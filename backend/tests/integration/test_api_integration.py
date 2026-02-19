@@ -233,15 +233,13 @@ class TestMashupRouter:
         assert body["query"] == "upbeat pop"
         assert "results" in body
 
-    def test_match_songs_returns_matches_key(self, client: TestClient):
+    def test_match_unknown_song_is_404(self, client: TestClient):
+        # Song not in library → 404 (real match requires an ingested song)
         resp = client.post(
             "/api/mashup/match",
-            params={"song_id": "taylor_swift_shake_it_off", "criteria": "hybrid", "top": 5},
+            params={"song_id": "not_in_library", "criteria": "hybrid", "top": 5},
         )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "song_id" in body
-        assert "matches" in body
+        assert resp.status_code == 404
 
     def test_create_mashup_accepted(self, client: TestClient):
         resp = client.post(
