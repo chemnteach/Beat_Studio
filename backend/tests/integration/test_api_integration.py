@@ -463,19 +463,38 @@ class TestNovaFadeRouter:
 
 
 class TestTaskRouter:
+    @staticmethod
+    def _real_task_id(client: TestClient) -> str:
+        """Upload a WAV and start analysis to get a real task_id."""
+        upload = client.post(
+            "/api/audio/upload",
+            files={"file": ("song.wav", _minimal_wav(), "audio/wav")},
+        )
+        audio_id = upload.json()["audio_id"]
+        analyze = client.post(
+            "/api/audio/analyze",
+            json={"audio_id": audio_id, "depth": "basic"},
+        )
+        return analyze.json()["task_id"]
+
     def test_get_task_returns_status(self, client: TestClient):
-        resp = client.get("/api/tasks/task-001")
+        task_id = self._real_task_id(client)
+        resp = client.get(f"/api/tasks/{task_id}")
         assert resp.status_code == 200
         body = resp.json()
         assert "task_id" in body
         assert "status" in body
 
     def test_get_task_echoes_id(self, client: TestClient):
-        body = client.get("/api/tasks/my-custom-task").json()
-        assert body["task_id"] == "my-custom-task"
+        task_id = self._real_task_id(client)
+        body = client.get(f"/api/tasks/{task_id}").json()
+        assert body["task_id"] == task_id
+
+    def test_get_unknown_task_is_404(self, client: TestClient):
+        resp = client.get("/api/tasks/no-such-task-xyz")
+        assert resp.status_code == 404
 
     def test_list_active_tasks_returns_tasks(self, client: TestClient):
-        # GET /api/tasks/ (root of router) → list_active_tasks
         resp = client.get("/api/tasks/")
         assert resp.status_code == 200
         body = resp.json()
@@ -483,8 +502,13 @@ class TestTaskRouter:
         assert isinstance(body["tasks"], list)
 
     def test_cancel_task_no_content(self, client: TestClient):
-        resp = client.delete("/api/tasks/task-001")
+        task_id = self._real_task_id(client)
+        resp = client.delete(f"/api/tasks/{task_id}")
         assert resp.status_code == 204
+
+    def test_cancel_unknown_task_is_404(self, client: TestClient):
+        resp = client.delete("/api/tasks/no-such-task-xyz")
+        assert resp.status_code == 404
 
 
 # ═════════════════════════════════════════════════════════════════════════════
