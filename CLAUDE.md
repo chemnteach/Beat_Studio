@@ -42,9 +42,9 @@ python scripts/setup_check.py --models  # model paths only
 |---|---|---|
 | audio/ | `analyzer.py`, `types.py`, `analysis.py` | Wired |
 | mashup/ | `ingestion.py`, `memory.py`, `curator.py`, `engineer.py` | Wired |
-| video/ | `backends/`, `beat_sync.py`, `assembler.py`, `encoder.py` | Stub |
-| lora/ | `registry.py`, `trainer.py`, `downloader.py`, `recommender.py` | Stub |
-| nova_fade/ | `character.py`, `canonical_prompts.py`, `dj_video_generator.py` | Stub |
+| video/ | `backends/`, `beat_sync.py`, `assembler.py`, `encoder.py` | Partial (plan wired) |
+| lora/ | `registry.py`, `trainer.py`, `downloader.py`, `recommender.py` | Partial (list/recommend wired) |
+| nova_fade/ | `character.py`, `canonical_prompts.py`, `dj_video_generator.py` | Partial (status wired) |
 | shared/ | `task_manager.py`, `vram_manager.py`, `hardware_detector.py`, `config.py` | Complete |
 
 ### BackgroundTasks Pattern
@@ -143,7 +143,9 @@ Only one model is loaded in VRAM at a time — **kill-and-revive pattern**. `VRA
 
 The `_minimal_wav()` helper at the top of the integration test file generates a valid 0.5-second silence WAV with no external dependencies. Use it for any test that needs a real audio file upload.
 
-Stubs still in place: `tasks`, `video`, `lora`, `nova_fade` routers all return placeholder data. Integration tests for those endpoints test shape/status only, not real results.
+Stubs still in place for heavy operations: `video/generate`, `video/scene/edit`, `lora/train`, `lora/download`, `nova_fade/generate-canonical`, `nova_fade/train-*`, `nova_fade/drift-test`, `nova_fade/dj-video`, and `system/models/install`. Integration tests for those endpoints test shape/status only.
+
+The `POST /api/video/plan` endpoint requires a cached analysis JSON (`backend/data/analysis/{audio_id}.json`). Tests that call this endpoint must upload + analyze first (the background task runs synchronously in TestClient so the JSON is written before the test gets the response). Use `TestVideoRouter._real_analysis_id(client)` as a helper.
 
 ## Constraints
 

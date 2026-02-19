@@ -275,10 +275,31 @@ class TestMashupRouter:
 
 
 class TestVideoRouter:
+    @staticmethod
+    def _real_analysis_id(client: TestClient) -> str:
+        """Upload a minimal WAV, run basic analysis, return audio_id.
+
+        The audio analysis BackgroundTask runs synchronously in TestClient,
+        so the JSON cache is written before this method returns.
+        """
+        upload_resp = client.post(
+            "/api/audio/upload",
+            files={"file": ("song.wav", _minimal_wav(), "audio/wav")},
+        )
+        assert upload_resp.status_code == 201
+        audio_id = upload_resp.json()["audio_id"]
+        analyze_resp = client.post(
+            "/api/audio/analyze",
+            json={"audio_id": audio_id, "depth": "basic"},
+        )
+        assert analyze_resp.status_code == 200
+        return audio_id
+
     def test_plan_video_returns_plan_id(self, client: TestClient):
+        audio_id = self._real_analysis_id(client)
         resp = client.post(
             "/api/video/plan",
-            json={"audio_id": "song-001", "style": "cinematic", "quality": "professional"},
+            json={"audio_id": audio_id, "style": "cinematic", "quality": "professional"},
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -286,9 +307,10 @@ class TestVideoRouter:
         assert "backend" in body
 
     def test_plan_has_cost_and_time(self, client: TestClient):
+        audio_id = self._real_analysis_id(client)
         body = client.post(
             "/api/video/plan",
-            json={"audio_id": "song-001"},
+            json={"audio_id": audio_id},
         ).json()
         assert "estimated_cost_usd" in body
         assert "estimated_time_sec" in body
@@ -548,11 +570,10 @@ class TestFullPipelineChain:
 
     def test_path_a_original_song_to_video(self, client: TestClient):
         """Path A: Upload audio → analyze → plan video → generate."""
-        # Step 1: upload
-        fake_audio = io.BytesIO(b"RIFF" + b"\x00" * 200)
+        # Step 1: upload (use a valid WAV so audio analysis writes the JSON cache)
         upload_resp = client.post(
             "/api/audio/upload",
-            files={"file": ("song.wav", fake_audio, "audio/wav")},
+            files={"file": ("song.wav", _minimal_wav(), "audio/wav")},
         )
         assert upload_resp.status_code == 201
         audio_id = upload_resp.json()["audio_id"]
@@ -602,10 +623,11 @@ class TestFullPipelineChain:
         assert task_resp.status_code == 200
         assert "status" in task_resp.json()
 
-        # Step 4: plan video for mashup output
+        # Step 4: plan video — use a real analysis id since /plan requires cached JSON
+        mashup_audio_id = TestVideoRouter._real_analysis_id(client)
         plan_resp = client.post(
             "/api/video/plan",
-            json={"audio_id": "mashup-output-001", "style": "synthwave", "quality": "basic"},
+            json={"audio_id": mashup_audio_id, "style": "synthwave", "quality": "basic"},
         )
         assert plan_resp.status_code == 200
 

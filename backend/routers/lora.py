@@ -1,12 +1,34 @@
 """LoRA router — registry, training, downloading, recommendations."""
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import dataclasses
+import logging
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, status
 from pydantic import BaseModel
 
+from backend.services.lora.registry import LoRARegistry
+
+logger = logging.getLogger("beat_studio.routers.lora")
 router = APIRouter()
+
+_BACKEND_DIR = Path(__file__).parent.parent
+_LORAS_YAML = _BACKEND_DIR / "config" / "loras.yaml"
+_LORAS_BASE = _BACKEND_DIR.parent / "output" / "loras"
+
+_registry: Optional[LoRARegistry] = None
+
+
+def _get_registry() -> LoRARegistry:
+    global _registry
+    if _registry is None:
+        _registry = LoRARegistry(
+            registry_path=str(_LORAS_YAML),
+            base_path=str(_LORAS_BASE),
+        )
+    return _registry
 
 
 class TrainRequest(BaseModel):
@@ -40,18 +62,37 @@ class RecommendRequest(BaseModel):
 
 
 @router.get("/list")
-async def list_loras(type_filter: str = None) -> Dict[str, Any]:
+async def list_loras(type_filter: Optional[str] = None) -> Dict[str, Any]:
     """List all registered LoRAs, optionally filtered by type."""
-    return {"loras": [], "total": 0, "type_filter": type_filter}
+    entries = _get_registry().list_all(type_filter=type_filter)
+    loras = [dataclasses.asdict(e) for e in entries]
+    return {"loras": loras, "total": len(loras), "type_filter": type_filter}
 
 
 @router.post("/recommend")
 async def recommend_loras(request: RecommendRequest) -> Dict[str, Any]:
-    """Get LoRA recommendations for a video project."""
+    """Get LoRA recommendations for a video project.
+
+    Returns available on-disk LoRAs whose tags match the requested style.
+    Downloadable and trainable suggestions require GPU/internet access and
+    remain empty until those services are wired.
+    """
+    registry = _get_registry()
+    style_lower = request.style.lower()
+
+    available = []
+    for entry in registry.list_all():
+        validation = registry.validate(entry.name)
+        if not validation.file_exists:
+            continue
+        tags_lower = {t.lower() for t in entry.tags}
+        if style_lower in tags_lower or entry.type.lower() == style_lower:
+            available.append(dataclasses.asdict(entry))
+
     return {
-        "available": [],
-        "downloadable": [],
-        "trainable": [],
+        "available":    available,
+        "downloadable": [],   # requires internet search — stub
+        "trainable":    [],   # requires NarrativeArc analysis — stub
     }
 
 
