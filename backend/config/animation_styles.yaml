@@ -1,0 +1,260 @@
+# Beat Studio — Animation Style Definitions
+# Managed by backend/services/prompt/style_mapper.py
+# Fields:
+#   display_name: Human-readable name
+#   category: traditional | modern | stylized_realism | abstract | photorealistic
+#   prompt_suffix: Style-specific prompt tokens (prepended to scene description)
+#   negative: Style-specific negative prompt tokens
+#   recommended_backend: animatediff | wan26_local | wan26_cloud | skyreels | svd | sdxl_controlnet
+#   guidance_scale: CFG scale (default 7.5)
+#   steps: Inference steps (default 20)
+#   best_for: Guidance on which music genres suit this style
+#   requires_source_footage: true if ControlNet input required (rotoscope only)
+
+styles:
+
+  # === Traditional Animation ===
+  cel_animation:
+    display_name: "Cel / Hand-Drawn Animation"
+    category: "traditional"
+    prompt_suffix: "traditional cel animation, clean line work, flat color fills, hand-drawn look, animation keyframe"
+    negative: "photorealistic, 3D render, CGI, blurry, low quality"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.5
+    steps: 20
+    best_for: "Classic animated music videos, cartoon aesthetics"
+
+  watercolor:
+    display_name: "Watercolor Animation"
+    category: "traditional"
+    prompt_suffix: "watercolor painting, soft bleeding edges, wet-on-wet technique, delicate brush strokes, paper texture"
+    negative: "photorealistic, sharp edges, digital, vector, flat color"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.0
+    steps: 20
+    best_for: "Soft, emotional, folk or acoustic music"
+
+  ink_wash:
+    display_name: "Ink Wash / Sumi-e"
+    category: "traditional"
+    prompt_suffix: "sumi-e ink wash painting, East Asian brush technique, minimal strokes, zen aesthetic, rice paper texture"
+    negative: "colorful, photorealistic, digital, cartoon, western style"
+    recommended_backend: "animatediff"
+    guidance_scale: 8.0
+    steps: 20
+    best_for: "Ambient, meditative, world music"
+
+  pencil_sketch:
+    display_name: "Pencil Sketch Animation"
+    category: "traditional"
+    prompt_suffix: "pencil sketch animation, graphite on paper, hand-drawn hatching, raw textured look, sketch lines visible"
+    negative: "color, photorealistic, clean lines, digital, polished"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.5
+    steps: 20
+    best_for: "Raw, emotional, singer-songwriter"
+
+  # === Modern / Digital ===
+  motion_graphics:
+    display_name: "Motion Graphics / Flat Design"
+    category: "modern"
+    prompt_suffix: "flat design motion graphics, bold geometric shapes, smooth vector animation, minimal, clean"
+    negative: "photorealistic, texture, noise, hand-drawn, sketch"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.0
+    steps: 20
+    best_for: "Electronic, pop, educational"
+
+  collage_mixed_media:
+    display_name: "Collage / Mixed Media"
+    category: "modern"
+    prompt_suffix: "mixed media collage, layered paper cutouts, found materials, textured surfaces, handmade craft aesthetic"
+    negative: "photorealistic, clean, digital, smooth, uniform"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.0
+    steps: 20
+    best_for: "Indie, experimental, alternative"
+
+  pixel_art:
+    display_name: "Pixel Art Animation"
+    category: "modern"
+    prompt_suffix: "pixel art animation, retro game aesthetic, 16-bit style, crisp pixels, limited color palette"
+    negative: "photorealistic, smooth, high resolution, anti-aliased, blurry"
+    recommended_backend: "animatediff"
+    guidance_scale: 8.0
+    steps: 20
+    best_for: "Chiptune, retro, electronic, game soundtracks"
+
+  low_poly_3d:
+    display_name: "Low-Poly 3D"
+    category: "modern"
+    prompt_suffix: "low-poly 3D render, geometric faceted shapes, stylized, minimal polygon count, flat shading"
+    negative: "photorealistic, organic, smooth, high-poly, subsurface scattering"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.5
+    steps: 20
+    best_for: "Electronic, ambient, synthpop"
+
+  isometric:
+    display_name: "Isometric Animation"
+    category: "modern"
+    prompt_suffix: "isometric view, fixed angle, geometric, diorama style, tilt-shift aesthetic, miniature world"
+    negative: "perspective, photorealistic, fisheye, wide angle"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.5
+    steps: 20
+    best_for: "Lofi, chill, ambient"
+
+  # === Stylized Realism ===
+  rotoscope:
+    display_name: "Rotoscope Animation"
+    category: "stylized_realism"
+    prompt_suffix: "rotoscope animation, traced from live footage, stylized outlines, painted over film"
+    negative: "photorealistic, cartoon, flat color, low quality"
+    recommended_backend: "sdxl_controlnet"
+    requires_source_footage: true
+    guidance_scale: 7.5
+    steps: 30
+    best_for: "Narrative music videos, A-ha Take On Me style"
+
+  oil_painting:
+    display_name: "Oil Painting Animation"
+    category: "stylized_realism"
+    prompt_suffix: "oil painting animation, thick impasto brushstrokes, rich color depth, Loving Vincent style, canvas texture"
+    negative: "photorealistic, flat, digital, clean, vector, cartoon"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.0
+    steps: 20
+    best_for: "Classical, orchestral, dramatic ballads"
+
+  comic_book:
+    display_name: "Comic Book / Graphic Novel"
+    category: "stylized_realism"
+    prompt_suffix: "comic book art style, bold ink outlines, halftone dot pattern, dramatic shading, graphic novel panel"
+    negative: "photorealistic, soft, blurry, watercolor, pastel"
+    recommended_backend: "animatediff"
+    guidance_scale: 8.0
+    steps: 20
+    best_for: "Rock, punk, action-heavy narratives"
+
+  pop_art:
+    display_name: "Pop Art"
+    category: "stylized_realism"
+    prompt_suffix: "pop art style, bold primary colors, screen print aesthetic, Andy Warhol inspired, Ben-Day dots"
+    negative: "photorealistic, muted colors, realistic shading, dark"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.5
+    steps: 20
+    best_for: "Pop, dance, upbeat anthems"
+
+  ukiyo_e:
+    display_name: "Ukiyo-e (Japanese Woodblock)"
+    category: "stylized_realism"
+    prompt_suffix: "ukiyo-e woodblock print style, flat color areas, strong outlines, Japanese traditional art, wave patterns"
+    negative: "photorealistic, 3D, digital, western, modern"
+    recommended_backend: "animatediff"
+    guidance_scale: 8.0
+    steps: 20
+    best_for: "World music, Japanese-influenced, contemplative"
+
+  # === Abstract / Experimental ===
+  synthwave:
+    display_name: "Synthwave / Neon"
+    category: "abstract"
+    prompt_suffix: "synthwave aesthetic, neon glow, retro-futuristic, grid lines, purple and cyan, chrome reflections"
+    negative: "natural, organic, daytime, muted colors, realistic"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.5
+    steps: 20
+    best_for: "Synthwave, retrowave, electronic, vaporwave"
+
+  graffiti:
+    display_name: "Graffiti / Street Art"
+    category: "abstract"
+    prompt_suffix: "graffiti street art style, spray paint texture, urban wall, bold tags, dripping paint, concrete surface"
+    negative: "clean, digital, photorealistic, smooth, pastel"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.5
+    steps: 20
+    best_for: "Hip-hop, rap, urban, breakbeat"
+
+  art_deco:
+    display_name: "Art Deco"
+    category: "abstract"
+    prompt_suffix: "art deco style, geometric elegance, gold leaf accents, 1920s glamour, symmetrical patterns, luxury"
+    negative: "modern, casual, rough, organic, photorealistic"
+    recommended_backend: "animatediff"
+    guidance_scale: 8.0
+    steps: 20
+    best_for: "Jazz, swing, electro-swing, cabaret"
+
+  impressionist:
+    display_name: "Impressionist"
+    category: "abstract"
+    prompt_suffix: "impressionist painting style, Monet inspired, visible brushstrokes, dappled light, soft focus, plein air"
+    negative: "photorealistic, sharp, digital, cartoon, flat color"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.0
+    steps: 20
+    best_for: "Classical, romantic, ambient, soft pop"
+
+  psychedelic:
+    display_name: "Psychedelic / Liquid"
+    category: "abstract"
+    prompt_suffix: "psychedelic art, flowing morphing shapes, kaleidoscopic patterns, vivid saturated colors, liquid motion, trippy"
+    negative: "photorealistic, muted, realistic, static, sharp edges"
+    recommended_backend: "animatediff"
+    guidance_scale: 6.5
+    steps: 20
+    best_for: "Psychedelic rock, EDM, trance, acid house"
+
+  lofi:
+    display_name: "Lo-Fi / Chill"
+    category: "abstract"
+    prompt_suffix: "lofi aesthetic, warm tones, grain texture, chill atmosphere, cozy, nostalgic"
+    negative: "sharp, harsh lighting, clinical, cold, modern"
+    recommended_backend: "animatediff"
+    guidance_scale: 6.5
+    steps: 20
+    best_for: "Lo-fi hip-hop, chill, study music, ambient"
+
+  anime:
+    display_name: "Anime"
+    category: "modern"
+    prompt_suffix: "anime style, vibrant colors, detailed linework, expressive characters, Japanese animation"
+    negative: "photorealistic, live action, photograph, 3D render"
+    recommended_backend: "animatediff"
+    guidance_scale: 7.0
+    steps: 20
+    best_for: "J-pop, K-pop, electronic, energetic"
+
+  abstract:
+    display_name: "Abstract / Experimental"
+    category: "abstract"
+    prompt_suffix: "abstract art, geometric shapes, flowing colors, experimental, non-representational"
+    negative: "realistic, figurative, photographic, literal"
+    recommended_backend: "animatediff"
+    guidance_scale: 8.0
+    steps: 25
+    best_for: "Experimental, ambient, avant-garde"
+
+  # === Photorealistic ===
+  photorealistic:
+    display_name: "Photorealistic"
+    category: "photorealistic"
+    prompt_suffix: "photorealistic, cinematic, 4K, professional cinematography, hyperdetailed"
+    negative: "cartoon, anime, drawing, painting, illustration, low quality"
+    recommended_backend: "wan26_cloud"
+    guidance_scale: 7.5
+    steps: 30
+    best_for: "Any genre requiring live-action aesthetic"
+
+  cinematic:
+    display_name: "Cinematic"
+    category: "photorealistic"
+    prompt_suffix: "cinematic film still, 35mm, anamorphic lens, shallow depth of field, film grain, color graded, dramatic lighting"
+    negative: "cartoon, anime, flat, illustration, amateur, webcam"
+    recommended_backend: "wan26_cloud"
+    guidance_scale: 7.5
+    steps: 30
+    best_for: "Dramatic narratives, any genre"

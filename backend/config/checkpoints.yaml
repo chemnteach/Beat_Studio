@@ -1,0 +1,232 @@
+# Beat Studio — Model Inventory
+# Lists all models used by Beat Studio: required, recommended, and optional.
+# Used by the setup checker and system router to report installation status.
+#
+# status values: required | recommended | optional | nsfw_optional
+# source values: huggingface | local_only | cloud_service
+#
+# cache_subdir: path relative to HuggingFace cache root
+#   (None means the model is downloaded/managed manually)
+
+models:
+
+  # ── Audio analysis ────────────────────────────────────────────────────────
+  - name: whisper_base
+    display_name: "Whisper Base"
+    purpose: "Audio transcription with word timestamps"
+    status: required
+    source: huggingface
+    repo_id: "openai/whisper-base"
+    cache_subdir: "models--openai--whisper-base"
+    size_gb: 0.15
+    vram_gb: 1.0
+    install_cmd: "python -c \"import whisper; whisper.load_model('base')\""
+
+  - name: demucs_htdemucs
+    display_name: "Demucs htdemucs"
+    purpose: "Stem separation (vocals, drums, bass, other)"
+    status: required
+    source: huggingface
+    repo_id: "facebook/demucs"
+    cache_subdir: null
+    size_gb: 0.3
+    vram_gb: 8.0
+    install_cmd: "python -c \"import demucs\""
+
+  - name: all_minilm_l6_v2
+    display_name: "all-MiniLM-L6-v2"
+    purpose: "Semantic embeddings for ChromaDB mashup matching"
+    status: required
+    source: huggingface
+    repo_id: "sentence-transformers/all-MiniLM-L6-v2"
+    cache_subdir: "models--sentence-transformers--all-MiniLM-L6-v2"
+    size_gb: 0.08
+    vram_gb: 0.5
+    install_cmd: "python -c \"from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')\""
+
+  # ── CLIP (drift detection) ────────────────────────────────────────────────
+  - name: open_clip_vit_b32
+    display_name: "OpenCLIP ViT-B/32"
+    purpose: "Nova Fade identity drift detection"
+    status: required
+    source: huggingface
+    repo_id: "laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
+    cache_subdir: null
+    size_gb: 0.35
+    vram_gb: 0.5
+    install_cmd: "python -c \"import open_clip; open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_s34b_b79k')\""
+
+  # ── Video generation: AnimateDiff ─────────────────────────────────────────
+  - name: animatediff_lightning_sdv15
+    display_name: "AnimateDiff-Lightning (4-step)"
+    purpose: "Fast animated video generation (SD 1.5 base)"
+    status: required
+    source: huggingface
+    repo_id: "ByteDance/AnimateDiff-Lightning"
+    cache_subdir: "models--ByteDance--AnimateDiff-Lightning"
+    size_gb: 1.8
+    vram_gb: 5.6
+    install_cmd: "python -c \"from diffusers import AnimateDiffPipeline\""
+
+  - name: epicrealism_natural_sin_rc1
+    display_name: "epiCRealism (SD 1.5 checkpoint)"
+    purpose: "AnimateDiff base model — photorealistic SD 1.5 output"
+    status: required
+    source: huggingface
+    repo_id: "emilianJR/epiCRealism"
+    cache_subdir: null
+    size_gb: 4.0
+    vram_gb: 5.6
+    install_cmd: null
+
+  # ── Video generation: SDXL ────────────────────────────────────────────────
+  - name: sdxl_base_1_0
+    display_name: "Stable Diffusion XL Base 1.0"
+    purpose: "Image generation, LoRA training base model"
+    status: required
+    source: huggingface
+    repo_id: "stabilityai/stable-diffusion-xl-base-1.0"
+    cache_subdir: "models--stabilityai--stable-diffusion-xl-base-1.0"
+    size_gb: 6.5
+    vram_gb: 8.0
+    install_cmd: "python -c \"from diffusers import StableDiffusionXLPipeline\""
+    note: "Already on disk (BeatCanvas)"
+
+  - name: sdxl_lightning_4step
+    display_name: "SDXL Lightning 4-Step"
+    purpose: "Fast SDXL image generation for previews"
+    status: recommended
+    source: huggingface
+    repo_id: "ByteDance/SDXL-Lightning"
+    cache_subdir: null
+    size_gb: 1.7
+    vram_gb: 8.0
+    install_cmd: null
+    note: "Already on disk (BeatCanvas)"
+
+  # ── Video generation: Photorealistic ─────────────────────────────────────
+  - name: realvisxl_v5_fp16
+    display_name: "RealVisXL V5.0 (fp16)"
+    purpose: "High-quality photorealistic SDXL checkpoint"
+    status: recommended
+    source: local_only
+    repo_id: null
+    cache_subdir: null
+    size_gb: 6.5
+    vram_gb: 8.0
+    install_cmd: null
+    note: "Already on disk (BeatCanvas) — no download needed"
+
+  - name: juggernaut_xl_v9
+    display_name: "Juggernaut XL v9"
+    purpose: "Alternative high-quality SDXL checkpoint"
+    status: recommended
+    source: local_only
+    repo_id: null
+    cache_subdir: null
+    size_gb: 6.7
+    vram_gb: 8.0
+    install_cmd: null
+    note: "Already on disk (BeatCanvas)"
+
+  # ── ControlNet ────────────────────────────────────────────────────────────
+  - name: controlnet_canny_sdxl
+    display_name: "ControlNet Canny (SDXL)"
+    purpose: "Rotoscope / edge-guided generation (sdxl_controlnet backend)"
+    status: recommended
+    source: huggingface
+    repo_id: "diffusion-edge/controlnet-canny-sdxl-1.0"
+    cache_subdir: null
+    size_gb: 5.0
+    vram_gb: 8.0
+    install_cmd: null
+
+  # ── Stable Video Diffusion ────────────────────────────────────────────────
+  - name: svd_xt
+    display_name: "Stable Video Diffusion XT"
+    purpose: "Image-to-video animation (SVD backend)"
+    status: recommended
+    source: huggingface
+    repo_id: "stabilityai/stable-video-diffusion-img2vid-xt"
+    cache_subdir: null
+    size_gb: 8.0
+    vram_gb: 7.5
+    install_cmd: null
+
+  # ── WAN 2.6 (local) ───────────────────────────────────────────────────────
+  - name: wan26_local
+    display_name: "WAN 2.6 (local)"
+    purpose: "High-quality video generation (local, 12 GB+ VRAM)"
+    status: optional
+    source: huggingface
+    repo_id: "Wan-AI/Wan2.1-T2V-14B"
+    cache_subdir: null
+    size_gb: 28.0
+    vram_gb: 12.0
+    install_cmd: null
+    note: "Cloud fallback available via WAN 2.6 RunPod if local VRAM insufficient"
+
+  # ── CogVideoX ─────────────────────────────────────────────────────────────
+  - name: cogvideox_5b
+    display_name: "CogVideoX-5B"
+    purpose: "Alternative text-to-video (evaluate during development)"
+    status: optional
+    source: huggingface
+    repo_id: "THUDM/CogVideoX-5b"
+    cache_subdir: null
+    size_gb: 10.0
+    vram_gb: 14.0
+    install_cmd: null
+
+  # ── NSFW-capable (optional, on request) ─────────────────────────────────
+  - name: lustify_v2
+    display_name: "Lustify v2"
+    purpose: "NSFW-capable image generation"
+    status: nsfw_optional
+    source: local_only
+    repo_id: null
+    cache_subdir: null
+    size_gb: 4.8
+    vram_gb: 8.0
+    install_cmd: null
+    note: "Already on disk (BeatCanvas)"
+
+  - name: pony_diffusion_v6_xl
+    display_name: "Pony Diffusion V6 XL"
+    purpose: "NSFW-capable with trigger tags"
+    status: nsfw_optional
+    source: local_only
+    repo_id: null
+    cache_subdir: null
+    size_gb: 6.5
+    vram_gb: 8.0
+    install_cmd: null
+    note: "Already on disk (BeatCanvas)"
+
+
+# ── Cloud services ────────────────────────────────────────────────────────────
+cloud_services:
+  - name: runpod_wan26
+    display_name: "RunPod WAN 2.6"
+    purpose: "Cloud photorealistic video generation"
+    env_var: "RUNPOD_API_KEY"
+    required: false
+
+  - name: runpod_skyreels
+    display_name: "RunPod SkyReels V2 DF"
+    purpose: "Cloud scene stitching for seamless video"
+    env_var: "RUNPOD_API_KEY"
+    required: false
+
+  - name: anthropic_api
+    display_name: "Anthropic Claude API"
+    purpose: "LLM semantic analysis (primary provider)"
+    env_var: "ANTHROPIC_API_KEY"
+    required: false
+    note: "Falls back to OpenAI if not set"
+
+  - name: openai_api
+    display_name: "OpenAI API"
+    purpose: "LLM semantic analysis (fallback provider)"
+    env_var: "OPENAI_API_KEY"
+    required: false

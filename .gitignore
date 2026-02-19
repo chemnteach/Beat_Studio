@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.coverage
+.coverage
+htmlcov/
+.tox/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment / secrets
+.env
+*.env
+
+# Models (large binary files)
+backend/models/
+!backend/models/.gitkeep
+
+# Data (generated content)
+backend/data/uploads/
+backend/data/generated_images/
+backend/data/generated_videos/
+!backend/data/uploads/.gitkeep
+!backend/data/generated_images/.gitkeep
+!backend/data/generated_videos/.gitkeep
+
+# Library cache (ChromaDB + audio)
+backend/data/library_cache/
+!backend/data/library_cache/.gitkeep
+
+# Output
+output/videos/
+output/loras/
+output/nova_fade/datasets/
+!output/videos/.gitkeep
+!output/loras/.gitkeep
+
+# Logs
+*.log
+mixer.log
+
+# SQLite task DB
+backend/tasks.db
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.env
+
+# OS
+.DS_Store
+Thumbs.db
+*Zone.Identifier
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

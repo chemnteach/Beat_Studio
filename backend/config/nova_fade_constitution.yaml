@@ -1,0 +1,88 @@
+# Nova Fade Character Constitution v1.0
+# Programmatic enforcement lives in backend/services/nova_fade/character.py
+# This YAML is the human-readable reference and audit trail.
+
+version: "1.0"
+character_name: "Nova Fade"
+trigger_token: "nova_fade_char"
+
+# ── Visual Identity ───────────────────────────────────────────────────────────
+visual_identity:
+  style: "3D cartoon, stylized, non-photorealistic"
+  hair: "vibrant purple, medium length"
+  accessories: "silver geometric earrings"
+  setting: "professional DJ booth / studio"
+  aesthetic: "confident, vibrant, modern"
+
+# ── Canonical Prompt Header ───────────────────────────────────────────────────
+canonical_prompt:
+  positive: >
+    nova_fade_char, 3D cartoon stylized DJ woman, vibrant purple hair,
+    silver geometric earrings, confident posture, DJ booth, professional studio
+  negative: >
+    photorealistic, realistic human skin, anime, manga, different face,
+    different hairstyle, age change, acrobatics, running, aggressive, combat,
+    low quality, blurry, deformed, extra limbs, watermark, text
+
+# ── Allowed Expressions ───────────────────────────────────────────────────────
+expressions:
+  neutral_confident: "neutral confident expression, slight smile, relaxed"
+  mischievous_grin: "mischievous grin, playful smirk, knowing look"
+  focused_intensity: "focused intensity expression, brow furrowed slightly, in the zone"
+  delighted_joy: "delighted joy expression, wide smile, eyes lit up, elated"
+  drop_anticipation: "drop anticipation expression, building excitement, leaning in"
+
+# ── Allowed Gestures ──────────────────────────────────────────────────────────
+gestures:
+  left_deck_scratch: "left hand on left turntable deck, scratching vinyl record"
+  right_deck_scratch: "right hand on right turntable deck, scratching vinyl record"
+  crossfader_tap: "finger on crossfader, precision tap gesture"
+  downbeat_head_nod: "head nodding on the downbeat, feeling the rhythm"
+  spotlight_presentation: "arms raised, presenting to the crowd, spotlight moment"
+
+# ── Forbidden Terms ───────────────────────────────────────────────────────────
+# Any of these appearing in a prompt will trigger a constitution violation.
+forbidden:
+  - "photorealistic"
+  - "realistic human skin"
+  - "anime"
+  - "manga"
+  - "age change"
+  - "different hairstyle"
+  - "different face"
+  - "acrobatics"
+  - "running"
+  - "aggressive dance"
+  - "physical combat"
+
+# ── DJ Action Types ───────────────────────────────────────────────────────────
+dj_actions:
+  idle_bob: "gentle full-body bob on the beat, hands near mixer"
+  deck_scratch_L: "left hand scratching left turntable, focused"
+  deck_scratch_R: "right hand scratching right turntable, focused"
+  crossfader_hit: "precise crossfader movement, energetic"
+  drop_reaction: "arms raised, crowd-facing, drop reaction pose"
+
+# ── Visual Themes ─────────────────────────────────────────────────────────────
+themes:
+  sponsor_neon:
+    description: "Neon-lit club with brand sponsor lighting"
+    primary_colors: ["purple", "cyan", "hot_pink"]
+  award_elegant:
+    description: "Clean award-show studio, premium feel"
+    primary_colors: ["gold", "white", "deep_navy"]
+  mashup_chaos:
+    description: "High-energy chaos, multiple visual layers"
+    primary_colors: ["red", "yellow", "electric_blue"]
+  chill_lofi:
+    description: "Lo-fi aesthetic, warm tones, intimate"
+    primary_colors: ["amber", "warm_orange", "soft_green"]
+
+# ── Drift Test Thresholds ─────────────────────────────────────────────────────
+drift_thresholds:
+  s_id_min: 0.75      # CLIP identity similarity minimum
+  s_face_min: 0.70    # CLIP face region similarity minimum
+  s_sil_min: 0.80     # Silhouette IoU minimum
+  v_batch_max: 0.15   # Maximum inter-batch variance
+  num_test_images: 20
+  seed_start: 42

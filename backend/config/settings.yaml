@@ -1,0 +1,136 @@
+# Beat Studio — Main Configuration
+
+paths:
+  library_cache: "backend/data/library_cache"
+  uploads: "backend/data/uploads"
+  generated_images: "backend/data/generated_images"
+  generated_videos: "backend/data/generated_videos"
+  output_videos: "output/videos"
+  output_loras: "output/loras"
+  nova_fade_canonical: "output/nova_fade/canonical"
+  nova_fade_datasets: "output/nova_fade/datasets"
+  models_dir: "backend/models"
+
+audio:
+  sample_rate: 44100
+  bit_depth: 16
+  channels: 2
+  default_format: "wav"
+
+models:
+  whisper_size: "base"            # tiny | base | small | medium | large
+  demucs_model: "htdemucs"        # mdx | htdemucs | htdemucs_ft
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  clip_model: "ViT-B-32"
+  clip_pretrained: "laion2b_s34b_b79k"
+
+llm:
+  primary_provider: "anthropic"
+  fallback_provider: "openai"
+  anthropic_model: "claude-sonnet-4-6"
+  openai_model: "gpt-4-turbo-preview"
+  max_retries: 3
+  timeout: 30
+
+mashup:
+  chroma_collection: "tiki_library"   # pinned name
+  chroma_db_path: "backend/data/library_cache/chroma"
+  bpm_tolerance: 0.05                 # ±5%
+  max_stretch_ratio: 1.2
+  default_match_criteria: "hybrid"
+  max_candidates: 5
+  weight_bpm: 0.35
+  weight_key: 0.30
+  weight_energy: 0.20
+  weight_genre: 0.15
+  min_compatibility: 0.5
+  max_pairs: 10
+
+engineer:
+  default_quality: "high"            # draft | high | broadcast
+  vocal_attenuation_db: -2
+  fade_duration_sec: 4.0
+  normalize_lufs: -14
+
+video:
+  default_fps: 24
+  default_resolution: [1920, 1080]
+  transition_duration_sec: 0.75
+  scene_min_duration_sec: 2.5
+  scene_max_duration_sec: 8.0
+  hero_scene_ratio: 0.25
+
+  # Quality tier scene counts
+  scenes:
+    basic: 12
+    professional: 24
+    cinematic: 48
+
+  backends:
+    animatediff:
+      vram_required_gb: 5.6
+      default_frames: 16
+      guidance_scale: 1.0
+      resolution: [576, 1024]
+
+    wan26_local:
+      vram_required_gb: 12.0
+
+    wan26_cloud:
+      vram_required_gb: 0.0    # cloud, no local VRAM
+      endpoint_env: "RUNPOD_WAN26_ENDPOINT"
+
+    skyreels_cloud:
+      vram_required_gb: 0.0
+      endpoint_env: "RUNPOD_SKYREELS_ENDPOINT"
+
+    cogvideox:
+      vram_required_gb: 14.0
+
+    svd:
+      vram_required_gb: 7.5
+      num_inference_steps: 25
+      motion_bucket_id: 127
+      noise_aug_strength: 0.1
+      fps: 8
+
+    sdxl_controlnet:
+      vram_required_gb: 8.0
+      controlnet_model: "diffusion-edge/controlnet-canny-sdxl-1.0"
+
+vram:
+  baseline_threshold_gb: 1.5    # must reach this after kill()
+  budget_gb: 12.0               # total VRAM budget for model loading
+
+performance:
+  max_concurrent_downloads: 4
+  enable_gpu: true
+  fallback_to_cpu: true
+  max_cache_size_gb: 50
+
+logging:
+  level: "INFO"
+  file: "beat_studio.log"
+  max_file_size_mb: 100
+  backup_count: 5
+
+nova_fade:
+  constitution_version: "1.0"
+  default_theme: "sponsor_neon"
+  canonical_set_version: null   # set after canonical images are locked
+
+lora:
+  registry_path: "backend/config/loras.yaml"
+  base_path: "output/loras"
+
+encoder:
+  default_video_codec: "libx264"
+  default_audio_codec: "aac"
+  crf: 18
+  preset: "medium"
+  platforms:
+    tiktok:   {resolution: [1080, 1920], video_bitrate: "5M", audio_bitrate: "192k"}
+    reels:    {resolution: [1080, 1920], video_bitrate: "5M", audio_bitrate: "192k"}
+    shorts:   {resolution: [1080, 1920], video_bitrate: "5M", audio_bitrate: "192k"}
+    youtube:  {resolution: [1920, 1080], video_bitrate: "8M", audio_bitrate: "320k"}
+    standard: {resolution: [1920, 1080], video_bitrate: "8M", audio_bitrate: "320k"}
