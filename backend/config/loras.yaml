@@ -1,26 +1,29 @@
-# Beat Studio — LoRA Registry
-# Managed by backend/services/lora/registry.py
-# Status values: available | missing | downloading
-
 loras:
-  - name: "nova_fade_id_v1"
-    type: "identity"
-    trigger_token: "novafade_char"
-    file_path: "identity/nova_fade_id_v1.safetensors"
-    weight: 0.85
-    status: "missing"
-    description: "Nova Fade character identity LoRA (not yet trained)"
-    tags: ["nova_fade", "character", "dj", "identity"]
-    source: "local"
-    source_url: null
-
-  - name: "crossfadeclub_style_v1"
-    type: "style"
-    trigger_token: "crossfadeclub_style"
-    file_path: "style/crossfadeclub_style_v1.safetensors"
-    weight: 0.7
-    status: "missing"
-    description: "Crossfade Club visual style LoRA (not yet trained)"
-    tags: ["crossfade_club", "style", "dj", "neon"]
-    source: "local"
-    source_url: null
+- description: Nova Fade character identity LoRA (not yet trained)
+  file_path: identity/nova_fade_id_v1.safetensors
+  name: nova_fade_id_v1
+  source: local
+  source_url: null
+  status: available
+  tags:
+  - nova_fade
+  - character
+  - dj
+  - identity
+  trigger_token: novafade_char
+  type: identity
+  weight: 0.85
+- description: Crossfade Club visual style LoRA (not yet trained)
+  file_path: style/crossfadeclub_style_v1.safetensors
+  name: crossfadeclub_style_v1
+  source: local
+  source_url: null
+  status: available
+  tags:
+  - crossfade_club
+  - style
+  - dj
+  - neon
+  trigger_token: crossfadeclub_style
+  type: style
+  weight: 0.7

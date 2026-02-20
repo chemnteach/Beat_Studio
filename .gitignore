@@ -31,9 +31,11 @@ backend/models/
 
 # Data (generated content)
 backend/data/uploads/
+backend/data/analysis/
 backend/data/generated_images/
 backend/data/generated_videos/
 !backend/data/uploads/.gitkeep
+!backend/data/analysis/.gitkeep
 !backend/data/generated_images/.gitkeep
 !backend/data/generated_videos/.gitkeep
 

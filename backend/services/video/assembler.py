@@ -110,6 +110,27 @@ class VideoAssembler:
         Returns:
             Path to the assembled video.
         """
-        raise NotImplementedError(
-            "_run_ffmpeg_concat requires FFmpeg. Mock in tests."
+        import subprocess
+        from pathlib import Path
+
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write concat list — ffmpeg concat demuxer format
+        concat_file = out_path.parent / "concat.txt"
+        concat_file.write_text(
+            "".join(f"file '{c.file_path}'\nduration {c.duration_sec}\n" for c in clips)
         )
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0", "-i", str(concat_file),
+            "-i", audio_path,
+            "-vf", f"scale={resolution[0]}:{resolution[1]}",
+            "-c:v", "libx264", "-c:a", "aac",
+            "-shortest",
+            output_path,
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        logger.info("Assembled %d clips → %s", len(clips), output_path)
+        return output_path

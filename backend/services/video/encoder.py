@@ -156,6 +156,22 @@ class VideoEncoder:
         Returns:
             Path to the encoded file.
         """
-        raise NotImplementedError(
-            "_run_ffmpeg requires FFmpeg binary. Mock in tests."
-        )
+        import subprocess
+        from pathlib import Path
+
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        cmd = [
+            "ffmpeg", "-y", "-i", input_path,
+            "-vf", f"scale={plat_preset.resolution[0]}:{plat_preset.resolution[1]}",
+            "-c:v", "libx264",
+            "-crf", str(enc_preset.crf),
+            "-preset", enc_preset.preset,
+            "-b:v", plat_preset.video_bitrate,
+            "-b:a", plat_preset.audio_bitrate,
+            "-c:a", "aac",
+            output_path,
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        logger.info("Encoded: %s → %s", input_path, output_path)
+        return output_path

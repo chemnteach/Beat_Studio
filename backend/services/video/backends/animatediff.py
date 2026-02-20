@@ -53,7 +53,20 @@ class AnimateDiffBackend(VideoBackend):
         return style in _SUPPORTED_STYLES
 
     def is_available(self) -> bool:
-        return self._model_path.exists()
+        """Check if AnimateDiff adapter is available locally or in HF hub cache."""
+        # Legacy: check explicit local .ckpt path
+        if self._model_path.exists():
+            return True
+        # Check HuggingFace hub cache for the HF-hosted adapter
+        try:
+            from huggingface_hub import try_to_load_from_cache
+            cached = try_to_load_from_cache(
+                "guoyww/animatediff-motion-adapter-v1-5-2",
+                filename="diffusion_pytorch_model.safetensors",
+            )
+            return cached is not None
+        except Exception:
+            return False
 
     def estimated_time_per_scene(self, resolution: Tuple[int, int] = (576, 1024)) -> float:
         # ~30 seconds on RTX 3080 for 16 frames at 576×1024
@@ -129,7 +142,52 @@ class AnimateDiffBackend(VideoBackend):
         fps: int,
         seed: int,
     ) -> str:
-        """Run the AnimateDiff pipeline. Override in tests."""
-        raise NotImplementedError(
-            "AnimateDiff pipeline not loaded. Call is_available() first."
+        """Run the AnimateDiff pipeline and return path to the generated clip."""
+        import uuid
+        from pathlib import Path
+
+        import torch
+        from diffusers import AnimateDiffPipeline, EulerDiscreteScheduler, MotionAdapter
+        from diffusers.utils import export_to_video
+
+        out_dir = Path("output/video/clips")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        clip_path = str(out_dir / f"clip_{uuid.uuid4().hex[:8]}.mp4")
+
+        num_frames = max(8, int(duration_sec * fps))
+
+        if self._pipeline is None:
+            logger.info("Loading AnimateDiff pipeline…")
+            adapter = MotionAdapter.from_pretrained(
+                "guoyww/animatediff-motion-adapter-v1-5-2",
+                torch_dtype=torch.float16,
+            )
+            pipe = AnimateDiffPipeline.from_pretrained(
+                "emilianJR/epiCRealism",
+                motion_adapter=adapter,
+                torch_dtype=torch.float16,
+            )
+            pipe.scheduler = EulerDiscreteScheduler.from_config(
+                pipe.scheduler.config,
+                beta_schedule="linear",
+                clip_sample=False,
+                timestep_spacing="linspace",
+                steps_offset=1,
+            )
+            pipe.enable_vae_slicing()
+            pipe.to("cuda")
+            self._pipeline = pipe
+
+        effective_seed = seed if seed >= 0 else 42
+        output = self._pipeline(
+            prompt=prompt.positive,
+            negative_prompt=prompt.negative,
+            num_frames=num_frames,
+            guidance_scale=prompt.cfg_scale,
+            num_inference_steps=prompt.steps,
+            generator=torch.Generator("cuda").manual_seed(effective_seed),
         )
+
+        export_to_video(output.frames[0], clip_path, fps=fps)
+        logger.debug("AnimateDiff clip: %s (%d frames)", clip_path, num_frames)
+        return clip_path
