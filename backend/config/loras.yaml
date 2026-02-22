@@ -1,29 +1,136 @@
 loras:
-- description: Nova Fade character identity LoRA (not yet trained)
+# Identity LoRAs
+- name: nova_fade_id_v1
+  description: Nova Fade character identity LoRA
   file_path: identity/nova_fade_id_v1.safetensors
-  name: nova_fade_id_v1
-  source: local
-  source_url: null
-  status: available
-  tags:
-  - nova_fade
-  - character
-  - dj
-  - identity
   trigger_token: novafade_char
   type: identity
   weight: 0.85
-- description: Crossfade Club visual style LoRA (not yet trained)
-  file_path: style/crossfadeclub_style_v1.safetensors
-  name: crossfadeclub_style_v1
+  status: available
+  tags: [nova_fade, character, dj, identity]
   source: local
   source_url: null
-  status: available
-  tags:
-  - crossfade_club
-  - style
-  - dj
-  - neon
+
+# Style LoRAs
+- name: crossfadeclub_style_v1
+  description: Crossfade Club visual style LoRA - neon, DJ booth aesthetic
+  file_path: style/crossfadeclub_style_v1.safetensors
   trigger_token: crossfadeclub_style
   type: style
   weight: 0.7
+  status: available
+  tags: [crossfade_club, style, dj, neon]
+  source: local
+  source_url: null
+
+- name: 70s-film-retro
+  description: 70s film aesthetic with vintage grain and warm tones
+  file_path: style/70s-film-retro.safetensors
+  trigger_token: 70s_film_style
+  type: style
+  weight: 0.7
+  status: available
+  tags: [retro, vintage, film, 70s]
+  source: local
+  source_url: null
+
+# Character LoRAs
+- name: rob-character
+  description: Rob character LoRA
+  file_path: character/rob-character.safetensors
+  trigger_token: rob_char
+  type: character
+  weight: 0.8
+  status: available
+  tags: [character, rob]
+  source: local
+  source_url: null
+
+- name: michele-character
+  description: Michele character LoRA
+  file_path: character/michele-character.safetensors
+  trigger_token: michele_char
+  type: character
+  weight: 0.8
+  status: available
+  tags: [character, michele]
+  source: local
+  source_url: null
+
+# Scene LoRAs
+- name: beach-bar-exterior
+  description: Beach bar exterior scene - tropical bar on the beach
+  file_path: scene/beach-bar-exterior.safetensors
+  trigger_token: beach_bar_ext
+  type: scene
+  weight: 0.75
+  status: available
+  tags: [scene, beach, bar, tropical, exterior]
+  source: local
+  source_url: null
+
+- name: beach-sunset
+  description: Beach sunset scene - golden hour on the beach
+  file_path: scene/beach-sunset.safetensors
+  trigger_token: beach_sunset
+  type: scene
+  weight: 0.75
+  status: available
+  tags: [scene, beach, sunset, golden_hour]
+  source: local
+  source_url: null
+
+- name: boat-deck
+  description: Boat deck scene - yacht or boat deck setting
+  file_path: scene/boat-deck.safetensors
+  trigger_token: boat_deck
+  type: scene
+  weight: 0.75
+  status: available
+  tags: [scene, boat, yacht, deck, ocean]
+  source: local
+  source_url: null
+
+- name: bonfire-beach
+  description: Beach bonfire scene - nighttime bonfire on the beach
+  file_path: scene/bonfire-beach.safetensors
+  trigger_token: bonfire_beach
+  type: scene
+  weight: 0.75
+  status: available
+  tags: [scene, beach, bonfire, night, fire]
+  source: local
+  source_url: null
+
+- name: ocean-underwater
+  description: Underwater ocean scene - beneath the waves
+  file_path: scene/ocean-underwater.safetensors
+  trigger_token: ocean_underwater
+  type: scene
+  weight: 0.75
+  status: available
+  tags: [scene, ocean, underwater, sea]
+  source: local
+  source_url: null
+
+- name: stage-performance
+  description: Stage performance scene - concert stage with lights
+  file_path: scene/stage-performance.safetensors
+  trigger_token: stage_perf
+  type: scene
+  weight: 0.75
+  status: available
+  tags: [scene, stage, concert, performance, lights]
+  source: local
+  source_url: null
+
+- name: tiki-bar-interior
+  description: Tiki bar interior scene - tropical bar with tiki decor
+  file_path: scene/tiki-bar-interior.safetensors
+  trigger_token: tiki_bar_int
+  type: scene
+  weight: 0.75
+  status: available
+  tags: [scene, tiki, bar, tropical, interior]
+  source: local
+  source_url: null

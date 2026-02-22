@@ -362,3 +362,69 @@ class TestLoRATrainer:
         result = trainer.prepare_dataset(str(dataset_dir))
         assert isinstance(result, DatasetResult)
         assert result.image_count == 3
+
+    def test_write_captions_creates_txt_sidecars(self, tmp_path):
+        from backend.services.lora.trainer import LoRATrainer
+        dataset_dir = tmp_path / "dataset"
+        dataset_dir.mkdir()
+        # Create dummy images
+        (dataset_dir / "img_0.png").write_bytes(b"\x89PNG" + b"\x00" * 100)
+        (dataset_dir / "img_1.png").write_bytes(b"\x89PNG" + b"\x00" * 100)
+
+        trainer = LoRATrainer()
+        captions = {
+            "img_0.png": "novafade_char, front view, neutral expression",
+            "img_1.png": "novafade_char, side view, smiling",
+        }
+        written = trainer.write_captions(str(dataset_dir), captions)
+
+        assert written == 2
+        assert (dataset_dir / "img_0.txt").exists()
+        assert (dataset_dir / "img_1.txt").exists()
+        assert "front view" in (dataset_dir / "img_0.txt").read_text()
+        assert "side view" in (dataset_dir / "img_1.txt").read_text()
+
+    def test_load_caption_reads_sidecar(self, tmp_path):
+        from pathlib import Path
+        from backend.services.lora.trainer import LoRATrainer
+        dataset_dir = tmp_path / "dataset"
+        dataset_dir.mkdir()
+        img_path = dataset_dir / "test.png"
+        img_path.write_bytes(b"\x89PNG" + b"\x00" * 100)
+        (dataset_dir / "test.txt").write_text("custom caption text")
+
+        trainer = LoRATrainer()
+        caption = trainer._load_caption(img_path, fallback="trigger_token")
+
+        assert caption == "custom caption text"
+
+    def test_load_caption_fallback_when_no_sidecar(self, tmp_path):
+        from pathlib import Path
+        from backend.services.lora.trainer import LoRATrainer
+        dataset_dir = tmp_path / "dataset"
+        dataset_dir.mkdir()
+        img_path = dataset_dir / "no_caption.png"
+        img_path.write_bytes(b"\x89PNG" + b"\x00" * 100)
+
+        trainer = LoRATrainer()
+        caption = trainer._load_caption(img_path, fallback="my_trigger")
+
+        assert caption == "my_trigger"
+
+    def test_prepare_dataset_counts_caption_files(self, tmp_path):
+        from backend.services.lora.trainer import LoRATrainer
+        dataset_dir = tmp_path / "dataset"
+        dataset_dir.mkdir()
+        # Create images with captions
+        (dataset_dir / "img_0.png").write_bytes(b"\x89PNG" + b"\x00" * 100)
+        (dataset_dir / "img_0.txt").write_text("caption 0")
+        (dataset_dir / "img_1.png").write_bytes(b"\x89PNG" + b"\x00" * 100)
+        (dataset_dir / "img_1.txt").write_text("caption 1")
+        (dataset_dir / "img_2.png").write_bytes(b"\x89PNG" + b"\x00" * 100)
+        # img_2 has no caption file
+
+        trainer = LoRATrainer()
+        result = trainer.prepare_dataset(str(dataset_dir))
+
+        assert result.image_count == 3
+        assert result.caption_count == 2  # Only 2 .txt files

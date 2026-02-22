@@ -73,6 +73,37 @@ class LoRATrainer:
 
         return self._run_training(config)
 
+    def write_captions(
+        self,
+        images_dir: str,
+        captions: Dict[str, str],
+    ) -> int:
+        """Write .txt sidecar caption files for images.
+
+        Args:
+            images_dir: Directory containing images.
+            captions: Dict mapping image filename (with extension) to caption text.
+                      Example: {"img001.png": "novafade_char, front view, neutral expression"}
+
+        Returns:
+            Number of caption files written.
+        """
+        dir_path = Path(images_dir)
+        written = 0
+        for filename, caption in captions.items():
+            img_path = dir_path / filename
+            if not img_path.exists():
+                logger.warning("Image not found for caption: %s", filename)
+                continue
+            txt_path = img_path.with_suffix(".txt")
+            try:
+                txt_path.write_text(caption, encoding="utf-8")
+                written += 1
+            except Exception as exc:
+                logger.warning("Failed to write caption %s: %s", txt_path, exc)
+        logger.info("Wrote %d caption files to %s", written, images_dir)
+        return written
+
     def prepare_dataset(
         self,
         images_dir: str,
@@ -160,6 +191,22 @@ class LoRATrainer:
 
         return False, "No LoRA training toolkit found (ai-toolkit or kohya_ss required)"
 
+    def _load_caption(self, image_path: Path, fallback: str) -> str:
+        """Load caption from .txt sidecar file, falling back to trigger token.
+
+        For image.png, looks for image.txt in the same directory.
+        If not found, returns the fallback (typically the trigger token).
+        """
+        txt_path = image_path.with_suffix(".txt")
+        if txt_path.exists():
+            try:
+                caption = txt_path.read_text(encoding="utf-8").strip()
+                if caption:
+                    return caption
+            except Exception as exc:
+                logger.warning("Failed to read caption %s: %s", txt_path, exc)
+        return fallback
+
     def _run_training(self, config: LoRATrainingConfig) -> TrainingResult:
         """Run SDXL LoRA training using diffusers + peft.
 
@@ -246,28 +293,49 @@ class LoRATrainer:
                 T.ToTensor(),
                 T.Normalize([0.5], [0.5]),
             ])
-            img_tensors = []
+            # Load images with their per-image captions
+            img_data: list[tuple[torch.Tensor, str]] = []
+            trigger = config.trigger_token
             for f in image_files:
                 try:
-                    img_tensors.append(transform(Image.open(f).convert("RGB")))
+                    img_tensor = transform(Image.open(f).convert("RGB"))
+                    caption = self._load_caption(f, trigger)
+                    img_data.append((img_tensor, caption))
                 except Exception as img_exc:
                     logger.warning("Skipped %s: %s", f.name, img_exc)
 
-            if not img_tensors:
+            if not img_data:
                 return TrainingResult(
                     success=False, lora_path="",
                     error="No valid images after loading",
                 )
 
-            # ── Pre-compute trigger-token text embeddings (SDXL: 2 encoders) ─
-            trigger = config.trigger_token
-            with torch.no_grad():
+            # Log caption stats
+            unique_captions = len(set(c for _, c in img_data))
+            logger.info(
+                "Loaded %d images with %d unique captions",
+                len(img_data), unique_captions,
+            )
+
+            # ── Helper to compute text embeddings for a caption (SDXL: 2 encoders) ─
+            add_time_ids = torch.tensor(
+                [[
+                    config.resolution, config.resolution,
+                    0, 0,
+                    config.resolution, config.resolution,
+                ]],
+                dtype=torch.float16,
+                device="cuda",
+            )
+
+            def encode_caption(caption: str):
+                """Compute SDXL text embeddings for a single caption."""
                 tok1 = pipe.tokenizer(
-                    trigger, return_tensors="pt", padding="max_length",
+                    caption, return_tensors="pt", padding="max_length",
                     max_length=pipe.tokenizer.model_max_length, truncation=True,
                 )
                 tok2 = pipe.tokenizer_2(
-                    trigger, return_tensors="pt", padding="max_length",
+                    caption, return_tensors="pt", padding="max_length",
                     max_length=pipe.tokenizer_2.model_max_length, truncation=True,
                 )
                 enc1 = pipe.text_encoder(
@@ -276,24 +344,16 @@ class LoRATrainer:
                 enc2 = pipe.text_encoder_2(
                     tok2.input_ids.to("cuda"), output_hidden_states=True,
                 )
-                # SDXL concatenates both encoder hidden states along the channel dim
+                # SDXL concatenates both encoder hidden states along channel dim
                 encoder_hidden_states = torch.cat(
                     [enc1.hidden_states[-2], enc2.hidden_states[-2]], dim=-1
                 )  # (1, 77, 2048)
                 pooled_embeds = enc2[0]  # (1, 1280)
-                add_time_ids = torch.tensor(
-                    [[
-                        config.resolution, config.resolution,
-                        0, 0,
-                        config.resolution, config.resolution,
-                    ]],
-                    dtype=torch.float16,
-                    device="cuda",
-                )
                 added_cond_kwargs = {
                     "text_embeds": pooled_embeds,
                     "time_ids": add_time_ids,
                 }
+                return encoder_hidden_states, added_cond_kwargs
 
             # ── Training loop ─────────────────────────────────────────────────
             optimizer = torch.optim.AdamW(
@@ -303,16 +363,20 @@ class LoRATrainer:
 
             logger.info(
                 "Training for %d steps on %d images",
-                config.training_steps, len(img_tensors),
+                config.training_steps, len(img_data),
             )
             for step in range(config.training_steps):
-                img_t = random.choice(img_tensors).unsqueeze(0).to("cuda", dtype=torch.float16)
+                # Sample image + its caption
+                img_tensor, caption = random.choice(img_data)
+                img_t = img_tensor.unsqueeze(0).to("cuda", dtype=torch.float16)
 
                 with torch.no_grad():
                     latents = (
                         pipe.vae.encode(img_t).latent_dist.sample()
                         * pipe.vae.config.scaling_factor
                     )
+                    # Compute embeddings for this image's caption
+                    encoder_hidden_states, added_cond_kwargs = encode_caption(caption)
 
                 noise = torch.randn_like(latents)
                 ts = torch.randint(
