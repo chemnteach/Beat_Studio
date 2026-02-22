@@ -1,0 +1,78 @@
+---
+session: Beat_Studio
+date: 2026-02-19
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Wire mashup router to real services + Beat_Studio on GitHub + CLAUDE.md + project memory
+
+now: Wire remaining stub routers — start with tasks router (real TaskManager), then video plan endpoint
+
+test: cd /home/craig/AI_Workspace/synterra/Beat_Studio && python -m pytest backend/tests/ -q && cd frontend && npm test -- --run
+
+done_this_session:
+  - task: Wire audio router to real AudioAnalyzer + TaskManager (upload-first flow)
+    files:
+      - backend/routers/audio.py
+      - backend/tests/integration/test_api_integration.py
+
+  - task: Wire mashup router to real ingestion, MashupLibrary, curator, engineer
+    files:
+      - backend/routers/mashup.py
+      - backend/tests/integration/test_api_integration.py
+
+  - task: Push Beat_Studio to GitHub (new repo, initial commit 130 files)
+    files: []
+
+  - task: Create CLAUDE.md for Beat_Studio
+    files:
+      - backend/../CLAUDE.md
+
+  - task: Initialize project MEMORY.md with repo locations and guideline note
+    files:
+      - /home/craig/.claude/projects/-home-craig-AI-Workspace-synterra-AI-Mixer/memory/MEMORY.md
+
+blockers: []
+
+questions:
+  - tasks router still stub — should it be wired to real TaskManager before other routers?
+  - video/lora/nova_fade routers all stub — which to wire next?
+
+decisions:
+  - shared_tasks_db: audio and mashup routers share the same tasks.db via separate TaskManager instances (safe with check_same_thread=False)
+  - ingest_pipeline_sequence: ingest_song → AudioAnalyzer.analyze(standard) → MashupLibrary.upsert_song (all in one background task)
+  - energy_level_scale: SongAnalysis.energy_level is 0–1; MashupLibrary stores 0–10 (multiply by 10)
+  - stem_swap_default_config: vocals from song_a, drums/bass/other from song_b
+  - beat_studio_main_branch: repo default branch is main (not master); force-pushed to fix empty main
+  - memory_md_created: saved repo URLs and confirmed guidelines are already in global CLAUDE.md
+
+findings:
+  - mashup_match_404_correct: POST /match returns 404 for unknown song_id (correct — stub returned 200)
+  - ingest_before_match: songs must be ingested before they can be matched or used in mashup create
+  - git_identity_not_global: Beat_Studio needed local git config (user.name/email) since no global config set
+  - analysis_json_excluded: backend/data/analysis/ added to .gitignore (generated test artifacts)
+
+worked:
+  - Upload-first / ingest-first patterns for integration tests (real flow, real 404s)
+  - Module-level singleton pattern for all heavy services
+  - Sharing tasks.db across routers via same file path
+
+failed: []
+
+next:
+  - Wire tasks router to real TaskManager (GET /{task_id}, GET /, DELETE /{task_id}, WebSocket)
+  - Wire video router plan endpoint to real VideoEngine / beat_sync
+  - Wire lora router to real registry, recommender, downloader
+  - Install pysoundfile (pip install pysoundfile) to silence librosa FutureWarning
+  - Download missing models: Whisper base + sentence-transformers/all-MiniLM-L6-v2
+
+files:
+  created:
+    - CLAUDE.md (Beat_Studio)
+    - /home/craig/.claude/projects/.../memory/MEMORY.md
+  modified:
+    - backend/routers/audio.py (stub → wired)
+    - backend/routers/mashup.py (stub → wired)
+    - backend/tests/integration/test_api_integration.py (upload-first tests, match 404 test)
+    - .gitignore (added backend/data/analysis/)

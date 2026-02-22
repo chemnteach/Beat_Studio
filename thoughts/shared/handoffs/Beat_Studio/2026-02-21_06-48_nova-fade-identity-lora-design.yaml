@@ -1,0 +1,73 @@
+---
+session: Beat_Studio
+date: 2026-02-21
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Design review — Nova Fade identity LoRA pipeline; discovered SDXL-only approach insufficient for character consistency
+
+now: Fix trainer to use per-image .txt sidecar captions; await Blender render session for Nova Fade identity training data
+
+test: cd /home/craig/AI_Workspace/synterra/Beat_Studio && python -m pytest backend/tests/ -q
+
+done_this_session:
+  - task: Designed automated success criteria for canonical gen + LoRA training (no human review needed)
+    files: []
+
+  - task: Identified fundamental gap — SDXL base prompts produce 20 different women, not 1 consistent Nova Fade
+    files: []
+
+  - task: Corrected canonical image pipeline — Blender renders are source of truth for identity LoRA, SDXL for style LoRA only
+    files: []
+
+  - task: Defined Blender render spec (50+ renders, 1024x1024, turntable + expressions + gestures, .txt sidecar captions)
+    files: []
+
+blockers:
+  - Nova Fade Blender model does not exist yet (user building from scratch)
+  - trainer._run_training() uses trigger token for all images; needs to read per-image .txt sidecar captions
+
+questions:
+  - DreamBooth vs LoRA for identity — with consistent 3D renders, LoRA rank 16 likely sufficient; revisit after first training run
+  - How complete is the Blender character mesh? Building from scratch or sourcing a base?
+
+decisions:
+  - blender_first_not_sdxl: SDXL /generate-canonical is NOT used for Nova Fade identity LoRA — produces inconsistent characters (different face/body each seed). Blender renders are the only correct source of truth for identity.
+  - sdxl_canonical_repurposed: POST /generate-canonical is repurposed for STYLE LoRA (Crossfade Club aesthetic) once identity LoRA exists. Sequence: identity first (Blender), then style (SDXL conditioned on identity LoRA).
+  - multistep_video_path: Original Blender-first path was correct for character consistency; pivot to AI video is correct for output. These are not in conflict — Blender produces training data, AnimateDiff produces final video.
+  - quality_over_speed: User explicitly prioritizes quality. Time is not a constraint. No shortcuts.
+
+findings:
+  - sdxl_base_no_identity: SDXL base model interprets text prompts as character TYPES not specific characters. Each seed = different individual. Cannot produce a consistent "Nova Fade" without a reference image anchor.
+  - lora_on_inconsistent_data: LoRA trained on inconsistent images learns style/vibe, not identity. Trigger token becomes "purple-haired DJ vibes", not "Nova Fade the specific character".
+  - trainer_caption_gap: Current _run_training() uses config.trigger_token as the sole text conditioning for all images. Ignores .txt sidecar files even though prepare_dataset() counts them. Must fix before Blender session.
+  - automated_validation_tiers: Pass/fail for both phases is fully automatable — task status + file size + numpy std > 10 covers 95% of failure modes; CLIP score optional tier 4.
+
+worked: []
+failed:
+  - sdxl_only_identity_approach: Would produce 20 different women, LoRA encodes inconsistency, character has no recognizable identity across video scenes.
+
+next:
+  - Fix LoRATrainer._run_training() to read per-image .txt sidecar captions (when present, use caption; else fall back to trigger token)
+  - Add caption-writing helper to prepare_dataset() or as a standalone script (writes novafade_char + description per render)
+  - Await Blender render session: 50+ renders at 1024x1024, turntable (16) + expressions (25) + gestures (9)
+  - After renders: drop into output/nova_fade/canonical/, add .txt sidecars, run POST /train-identity-lora
+  - Evaluate identity LoRA with automated checks, then proceed to style LoRA (SDXL /generate-canonical)
+  - Eventually: wire IP-Adapter as optional consistency booster for style LoRA generation
+
+files:
+  created: []
+  modified: []
+
+render_spec:
+  resolution: 1024x1024
+  format: PNG
+  background: neutral grey or transparent
+  lighting: studio three-point
+  total_minimum: 50
+  groups:
+    turntable: "16 frames, 0-337.5deg every 22.5deg, neutral_confident expression"
+    expressions: "25 frames, 5 expressions x 5 angles (front, 3/4L, 3/4R, sideL, sideR)"
+    gestures: "9 frames, 3 DJ actions x 3 angles"
+  caption_format: "novafade_char, 3D cartoon stylized DJ woman, vibrant purple hair, silver geometric earrings, {expression}, {angle_description}"

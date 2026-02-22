@@ -1,0 +1,104 @@
+---
+session: Beat_Studio
+date: 2026-02-18
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Complete Beat_Studio Phases 2 (Audio Engine) and 3 (Prompt Generation) with full TDD - 179/179 tests passing
+
+now: Begin Phase 4 (LoRA Management) in Beat_Studio - implement LoRA Registry (YAML-based), Downloader, Recommender
+
+test: cd /home/craig/AI_Workspace/synterra/Beat_Studio && python -m pytest backend/tests/unit/ -q
+
+done_this_session:
+  - task: Phase 2 - Audio Engine (100 tests, all passing)
+    files:
+      - backend/services/audio/types.py
+      - backend/services/audio/analyzer.py
+      - backend/services/audio/analysis.py
+      - backend/services/audio/processing.py
+      - backend/services/mashup/memory.py
+      - backend/services/mashup/ingestion.py
+      - backend/services/mashup/analyst.py
+      - backend/services/mashup/curator.py
+      - backend/services/mashup/engineer.py
+      - backend/tests/unit/test_audio_analyzer.py
+      - backend/tests/unit/test_audio_processing.py
+      - backend/tests/unit/test_mashup_memory.py
+      - backend/tests/unit/test_mashup_ingestion.py
+      - backend/tests/unit/test_mashup_analyst.py
+      - backend/tests/unit/test_mashup_curator.py
+      - backend/tests/unit/test_mashup_engineer.py
+
+  - task: Phase 3 - Prompt Generation (26 tests, all passing)
+    files:
+      - backend/services/prompt/types.py
+      - backend/services/prompt/narrative_analyzer.py
+      - backend/services/prompt/scene_generator.py
+      - backend/services/prompt/prompt_composer.py
+      - backend/services/prompt/style_mapper.py
+      - backend/tests/unit/test_prompt_generation.py
+
+  - task: Fixed ChromaDB embedding fallback (_HashEmbeddingFunction)
+    files:
+      - backend/services/mashup/memory.py
+
+blockers: []
+
+questions:
+  - Beat_Studio has no git repo of its own - is it intentionally tracked under AI_Mixer or should it get its own repo?
+
+decisions:
+  - chromadb_pinned_0422: Pinned to 0.4.22 to avoid breaking changes, same as AI_Mixer
+  - hash_embedding_fallback: SHA256-based 384-dim deterministic embeddings when sentence_transformers unavailable
+  - nsfw_as_composer_param: NSFW handled via PromptComposer.compose(nsfw=True/False) - not a separate module
+  - five_styles_registered: cinematic, anime, lofi, abstract, photorealistic - all with non-empty prefix/negative/model
+
+findings:
+  - beat_studio_structure: Beat_Studio at /home/craig/AI_Workspace/synterra/Beat_Studio, separate from AI_Mixer but not a git repo
+  - phase3_test_count: 26 tests (not 35 as originally written - some tests were deduplicated during collection)
+  - chromadb_struct_error: SHA256 produces 32 bytes; need math.ceil(needed/len(h)) repeats not integer division
+  - audio_types_shared: SectionInfo/SceneTiming/SongAnalysis from audio.types used by both audio and mashup services
+
+worked:
+  - Porting AI_Mixer mashup pipeline (analyst/curator/engineer) wholesale into Beat_Studio backend
+  - _HashEmbeddingFunction for ChromaDB without sentence_transformers
+  - Three-tier AudioAnalyzer depth system (basic/standard/full) for speed/quality tradeoffs
+  - Mock-based unit tests with no real audio files needed
+
+failed:
+  - Initial struct.error in _HashEmbeddingFunction due to wrong buffer repeat calculation
+
+next:
+  - Phase 4 - LoRA Management: implement LoRA Registry (YAML-based), LoRADownloader (HuggingFace + Civitai), LoRARecommender
+  - Migrate existing LoRAs from BeatCanvas
+  - Fix scene LoRA checkpoint renaming issue
+  - Phase 4 tests (TDD as always)
+
+files:
+  created:
+    - backend/services/audio/types.py
+    - backend/services/audio/analyzer.py
+    - backend/services/audio/analysis.py
+    - backend/services/audio/processing.py
+    - backend/services/mashup/memory.py
+    - backend/services/mashup/ingestion.py
+    - backend/services/mashup/analyst.py
+    - backend/services/mashup/curator.py
+    - backend/services/mashup/engineer.py
+    - backend/services/prompt/types.py
+    - backend/services/prompt/narrative_analyzer.py
+    - backend/services/prompt/scene_generator.py
+    - backend/services/prompt/prompt_composer.py
+    - backend/services/prompt/style_mapper.py
+    - backend/tests/unit/test_audio_analyzer.py
+    - backend/tests/unit/test_audio_processing.py
+    - backend/tests/unit/test_mashup_memory.py
+    - backend/tests/unit/test_mashup_ingestion.py
+    - backend/tests/unit/test_mashup_analyst.py
+    - backend/tests/unit/test_mashup_curator.py
+    - backend/tests/unit/test_mashup_engineer.py
+    - backend/tests/unit/test_prompt_generation.py
+  modified:
+    - plan.md (Phase 2 + Phase 3 todos marked complete)

@@ -1,0 +1,114 @@
+---
+session: Beat_Studio
+date: 2026-02-18
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Complete Beat_Studio Phases 10 (React Frontend), 11 (Integration Tests), 12 (Setup & Models) — all 12 phases done, 498 tests passing
+
+now: Wire FastAPI router stubs to real services — start with audio router → AudioAnalyzer, then mashup router → mashup pipeline
+
+test: cd /home/craig/AI_Workspace/synterra/Beat_Studio && python -m pytest backend/tests/ -q && cd frontend && npm test -- --run
+
+done_this_session:
+  - task: Phase 10 - React Frontend (36 tests)
+    files:
+      - frontend/src/App.tsx
+      - frontend/src/types/index.ts
+      - frontend/src/hooks/useWebSocket.ts
+      - frontend/src/hooks/useTaskPolling.ts
+      - frontend/src/components/AudioUpload.tsx
+      - frontend/src/components/SongAnalysis.tsx
+      - frontend/src/components/MashupWorkshop.tsx
+      - frontend/src/components/MashupLibrary.tsx
+      - frontend/src/components/StyleSelector.tsx
+      - frontend/src/components/SceneEditor.tsx
+      - frontend/src/components/ExecutionPlanner.tsx
+      - frontend/src/components/ProgressTracker.tsx
+      - frontend/src/components/VideoPreview.tsx
+      - frontend/src/components/VideoStudio.tsx
+      - frontend/src/components/LoRAManager.tsx
+      - frontend/src/components/CostEstimator.tsx
+      - frontend/src/components/HardwareStatus.tsx
+      - frontend/src/components/NovaFadeStudio.tsx
+      - frontend/src/components/App.test.tsx
+      - frontend/src/components/AudioUpload.test.tsx
+      - frontend/src/components/SongAnalysis.test.tsx
+      - frontend/src/components/ExecutionPlanner.test.tsx
+      - frontend/src/components/CostEstimator.test.tsx
+      - frontend/src/components/VideoPreview.test.tsx
+
+  - task: Phase 11 - Integration Tests (53 tests)
+    files:
+      - backend/tests/integration/test_api_integration.py
+      - backend/tests/conftest.py
+
+  - task: Phase 12 - Setup & Models
+    files:
+      - scripts/setup_check.py
+      - backend/config/checkpoints.yaml
+      - README.md
+
+  - task: Router type annotation fixes (2 bugs found by integration tests)
+    files:
+      - backend/routers/video.py
+      - backend/routers/nova_fade.py
+
+blockers: []
+
+questions:
+  - All routers return stub data — when should real service wiring begin?
+  - BeatCanvas LoRA files not yet migrated (needs file access)
+
+decisions:
+  - integration_tests_use_module_scope_client: TestClient with scope=module for efficiency
+  - conftest_fixtures_added: mock_gpu, sample_audio_file, mock_video_backend, api_client
+  - websocket_url_at_tasks_prefix: WebSocket at /api/tasks/ws/{task_id} (not /ws/{task_id})
+  - dict_str_any_for_mixed_responses: Dict[str, Any] when response contains non-string values
+
+findings:
+  - frontend_test_count_36: 6 test files, all passing (App.test.tsx had duplicate testid bug fixed)
+  - backend_total_462: 409 unit + 53 integration
+  - grand_total_498: 462 backend + 36 frontend
+  - setup_checker_works: Detects GPU (RTX 5070 Ti 12.8 GB), finds SDXL + AnimateDiff, reports missing Whisper/sentence-transformers
+  - router_stubs_all_pass: All 7 routers pass integration tests but return placeholder data
+  - nova_fade_status_no_status_key: Response has constitution_version/identity_lora, not a generic "status" field
+
+worked:
+  - TDD-first approach for all phases
+  - FastAPI TestClient with module-scoped fixture for integration tests
+  - mock_gpu pattern using unittest.mock.patch for torch.cuda calls
+  - sample_audio_file fixture writes real WAV bytes (no external deps)
+
+failed:
+  - Initial App.test.tsx used getByTestId which matched duplicate IDs (both nav button and content div) — fixed by switching to getByRole
+
+next:
+  - Wire audio router to AudioAnalyzer service
+  - Wire mashup router to mashup pipeline (ingestion, library, matching, create)
+  - Run `python scripts/setup_check.py` and download missing models (Whisper, sentence-transformers)
+  - Generate Nova Fade canonical image set (needs GPU + SDXL)
+  - Migrate BeatCanvas LoRAs to Beat_Studio output/loras/
+
+files:
+  created:
+    - frontend/src/App.tsx
+    - frontend/src/types/index.ts
+    - frontend/src/hooks/useWebSocket.ts
+    - frontend/src/hooks/useTaskPolling.ts
+    - frontend/src/components/ (14 components + 6 test files)
+    - frontend/package.json
+    - frontend/tsconfig.json
+    - frontend/tsconfig.node.json
+    - frontend/vite.config.ts
+    - frontend/src/test-setup.ts
+    - backend/tests/integration/test_api_integration.py
+    - scripts/setup_check.py
+    - backend/config/checkpoints.yaml
+    - README.md
+  modified:
+    - backend/tests/conftest.py (added 4 new fixtures)
+    - backend/routers/video.py (Dict[str, Any] fix)
+    - backend/routers/nova_fade.py (Dict[str, Any] fix)
+    - plan.md (Phases 10-12 todos marked complete)

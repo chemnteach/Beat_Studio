@@ -1,0 +1,99 @@
+---
+session: Beat_Studio
+date: 2026-02-20
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Wire GPU pipelines — SDXL canonical gen, LoRA training, AnimateDiff video gen, FFmpeg assembler/encoder
+
+now: Start Beat_Studio server, run POST /nova-fade/generate-canonical (GPU), then train identity LoRA
+
+test: cd /home/craig/AI_Workspace/synterra/Beat_Studio && python -m pytest backend/tests/ -q
+
+done_this_session:
+  - task: Fix _NOVA_IDENTITY_LORA name mismatch ("novafade_id_v1" → "nova_fade_id_v1" matching loras.yaml)
+    files:
+      - backend/routers/nova_fade.py
+
+  - task: Wire POST /generate-canonical (SDXL pipeline + NovaFadeCharacter prompts + VRAMManager + TaskManager)
+    files:
+      - backend/routers/nova_fade.py
+
+  - task: Wire POST /train-identity-lora + POST /train-style-lora (LoRATrainer + LoRARegistry update + BackgroundTasks)
+    files:
+      - backend/routers/nova_fade.py
+
+  - task: Implement LoRATrainer._run_training() with real diffusers + peft SDXL LoRA training
+    files:
+      - backend/services/lora/trainer.py
+
+  - task: Implement VideoAssembler._run_ffmpeg_concat() via subprocess (ffmpeg concat demuxer + audio mux)
+    files:
+      - backend/services/video/assembler.py
+
+  - task: Implement VideoEncoder._run_ffmpeg() via subprocess (CRF/preset/scale/bitrate)
+    files:
+      - backend/services/video/encoder.py
+
+  - task: Fix AnimateDiff is_available() to check HF hub cache; implement _run_pipeline() with AnimateDiffPipeline
+    files:
+      - backend/services/video/backends/animatediff.py
+
+  - task: Wire POST /video/generate — full pipeline (NarrativeAnalyzer → ScenePromptGenerator → AnimateDiff → VideoAssembler → VideoEncoder)
+    files:
+      - backend/routers/video.py
+
+  - task: Fix 3 failing tests (train endpoints 422→202, video generate HTTPException in background task)
+    files:
+      - backend/routers/nova_fade.py
+      - backend/routers/video.py
+
+blockers: []
+
+questions:
+  - Nova Fade canonical gen — ready to run on GPU; is 20 images (default) enough for identity LoRA, or should we use 25-30?
+  - AnimateDiff adapter (guoyww/animatediff-motion-adapter-v1-5-2) — downloaded yet or will it download on first call?
+  - /drift-test — open_clip installed? This is still stubbed.
+
+decisions:
+  - train_endpoints_optional_body: TrainLoRARequest made Optional with defaults — allows no-body POST (tests pass, real callers can pass config)
+  - video_generate_no_reraise_http: Background workers after 202 must never re-raise HTTPException — fail_task instead
+  - scene_timing_adapter: SyncedScenePlan → SceneTiming via local helper (_parse_section_type from notes, energy_level=1.0 for hero else 0.5)
+  - load_full_analysis_separate: Added _load_full_analysis() returning real SongAnalysis (with SectionInfo) for NarrativeAnalyzer; _load_analysis_for_sync() still used for BeatSynchronizer
+  - quality_to_enc_mapping: basic→draft, professional→standard, cinematic→broadcast for VideoEncoder
+  - lora_training_full_pipeline: Load full SDXL pipe (not just UNet) to get VAE + both text encoders in one call; DDPMScheduler for training
+  - animatediff_hf_adapter: Use guoyww/animatediff-motion-adapter-v1-5-2 from HF (not local .ckpt); is_available() checks HF cache via try_to_load_from_cache
+
+findings:
+  - sdxl_two_text_encoders: SDXL requires concatenating hidden states from text_encoder (768-dim) + text_encoder_2 (1280-dim) → 2048-dim encoder_hidden_states; pooled_embeds from enc2[0]
+  - add_time_ids_format: SDXL add_time_ids = [orig_h, orig_w, crop_y, crop_x, target_h, target_w] (6 values)
+  - background_task_exception_handling: Starlette TestClient runs background tasks synchronously — re-raising inside them causes "response already started" RuntimeError
+  - optional_body_fastapi: Optional[PydanticModel] = None in endpoint signature → FastAPI accepts empty-body POST; must put BackgroundTasks first (as non-optional dep)
+  - synced_scene_plan_missing_fields: SyncedScenePlan lacks energy_level + section_type; ScenePromptGenerator needs them — convert via SceneTiming adapter
+
+worked:
+  - Optional[TrainLoRARequest] = None pattern for no-body POST acceptance
+  - Putting BackgroundTasks before Optional body param in FastAPI signature
+  - Full SDXL pipeline load (vs UNet-only) for cleaner access to VAE + dual text encoders
+  - peft LoraConfig on UNet attention layers with target_modules list
+  - ffmpeg concat demuxer with concat.txt file list (simple, reliable)
+
+failed: []
+
+next:
+  - GPU run: start uvicorn, POST /api/nova-fade/generate-canonical {"num_images": 20}, poll task
+  - Train identity LoRA: POST /api/nova-fade/train-identity-lora (after canonical images exist)
+  - Wire /drift-test to real CLIP drift detection (check if open_clip is installed)
+  - Wire /lora/recommend to full NarrativeArc pipeline (currently tag-only filter)
+  - WAN 2.6 backend — deferred to cloud session
+
+files:
+  created: []
+  modified:
+    - backend/routers/nova_fade.py (name fix; generate-canonical + train endpoints wired; TaskManager/VRAMManager singletons; TrainLoRARequest model)
+    - backend/services/lora/trainer.py (_run_training() implemented with diffusers+peft SDXL LoRA)
+    - backend/services/video/assembler.py (_run_ffmpeg_concat() implemented)
+    - backend/services/video/encoder.py (_run_ffmpeg() implemented)
+    - backend/services/video/backends/animatediff.py (is_available() fixed; _run_pipeline() implemented)
+    - backend/routers/video.py (_load_full_analysis(); _task_manager singleton; _run_generate_video() worker; POST /generate wired; GenerateRequest extended)

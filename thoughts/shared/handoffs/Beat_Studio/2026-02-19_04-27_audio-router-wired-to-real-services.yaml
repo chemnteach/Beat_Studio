@@ -1,0 +1,60 @@
+---
+session: Beat_Studio
+date: 2026-02-19
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Wire audio router to real AudioAnalyzer + TaskManager services — 499 tests passing
+
+now: Wire mashup router to real mashup pipeline (ingestion, library, matching, create)
+
+test: cd /home/craig/AI_Workspace/synterra/Beat_Studio && python -m pytest backend/tests/ -q && cd frontend && npm test -- --run
+
+done_this_session:
+  - task: Rewrote audio router stub → real service wiring
+    files:
+      - backend/routers/audio.py
+
+  - task: Fixed 4 integration tests that relied on fake audio_ids (now require real upload-first flow)
+    files:
+      - backend/tests/integration/test_api_integration.py
+
+blockers: []
+
+questions:
+  - Should mashup router wire to real ChromaDB (requires DB to exist) or use conditional/fallback?
+  - PySoundFile not installed — librosa falls back to audioread (FutureWarning). Install pysoundfile?
+
+decisions:
+  - upload_then_analyze_flow: POST /upload returns UUID audio_id; POST /analyze validates sidecar exists; real 404 for unknown IDs
+  - background_tasks_for_analysis: BackgroundTasks runs _run_analysis in thread pool (librosa is sync/CPU-heavy)
+  - sidecar_meta_json: {audio_id}.meta.json maps audio_id → original filename + absolute path for background worker
+  - module_level_singletons: _task_manager and _analyzer lazy-initialized once per process, not per request
+  - minimal_wav_helper: _minimal_wav() helper added to integration test file for upload-first tests
+
+findings:
+  - librosa_warnings_benign: "n_fft too large" and "empty frequency set" warnings from 0.5-sec silence WAV — no effect on correctness
+  - test_count_now_499: 463 backend (409 unit + 54 integration) + 36 frontend = 499 total
+  - integration_test_count_54: Added test_get_analysis_unknown_id_is_404 (was 53, now 54)
+  - audio_router_fully_wired: All three endpoints exercise real services end-to-end in tests
+
+worked:
+  - Upload-first pattern for integration tests (upload real WAV, use returned audio_id)
+  - Inlining _minimal_wav() helper in integration test file (avoids fixture scope mismatch with module-scoped client)
+  - BackgroundTasks dispatching sync AudioAnalyzer.analyze() to thread pool
+
+failed: []
+
+next:
+  - Wire mashup router → real mashup pipeline (ingestion, library, matching, create)
+  - Install pysoundfile to silence librosa audioread FutureWarning (pip install pysoundfile)
+  - Run `python scripts/setup_check.py` and download missing models (Whisper base, sentence-transformers)
+  - Generate Nova Fade canonical image set (needs GPU + SDXL)
+  - Migrate BeatCanvas LoRAs to Beat_Studio output/loras/
+
+files:
+  created: []
+  modified:
+    - backend/routers/audio.py (stub → full service wiring)
+    - backend/tests/integration/test_api_integration.py (upload-first tests, _minimal_wav helper, +1 test)

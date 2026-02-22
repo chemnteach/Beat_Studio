@@ -1,0 +1,58 @@
+---
+session: Beat_Studio
+date: 2026-02-19
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Install missing models + wire tasks router — 465 tests passing, frontend progress now live
+
+now: Wire video router POST /plan endpoint using beat_sync + VRAMManager
+
+test: cd /home/craig/AI_Workspace/synterra/Beat_Studio && python -m pytest backend/tests/ -q
+
+done_this_session:
+  - task: Install openai-whisper, sentence-transformers, pysoundfile
+    files: []
+
+  - task: Wire tasks router to real TaskManager (GET, DELETE, WebSocket)
+    files:
+      - backend/routers/tasks.py
+      - backend/tests/integration/test_api_integration.py
+
+blockers: []
+
+questions:
+  - Video plan endpoint — should it call beat_sync.py directly or go through a VideoEngine orchestrator?
+  - LoRA registry — read from loras.yaml on every request or cache in memory?
+
+decisions:
+  - ws_poll_interval_500ms: WebSocket polls SQLite every 500ms — low enough latency, won't hammer DB
+  - ws_timeout_1hr: WebSocket auto-closes after 1 hour to prevent zombie connections
+  - status_map_complete_to_completed: TaskManager stores "complete"; frontend TypeScript expects "completed" — mapped in _state_to_dict()
+  - real_task_id_in_tests: Integration tests create real tasks via upload→analyze rather than fake IDs
+  - terminal_statuses: complete, failed, cancelled all close the WebSocket
+
+findings:
+  - websocket_tests_passed_unchanged: WS tests still passed with real router because error-path JSON includes task_id
+  - sentence_transformers_5_2_3: Installed OK — ChromaDB embeddings now use real vectors not hash fallback
+  - whisper_20250625: Latest version installed — depth="full" analysis now fully functional
+  - test_count_465: 409 unit + 56 integration (added 2 new 404 tests for unknown task_id)
+
+worked:
+  - _real_task_id() static helper on TestTaskRouter class — creates real task inline without fixture
+  - Polling pattern for WebSocket (asyncio.sleep loop) — simple, correct for SQLite backend
+
+failed: []
+
+next:
+  - Wire video router POST /plan (beat_sync.py + VRAMManager backend selection)
+  - Wire lora router GET / (list registry from loras.yaml) + GET /recommend
+  - Wire nova_fade router GET /status (reads nova_fade_constitution.yaml)
+  - Generate Nova Fade canonical images (GPU session needed)
+
+files:
+  created: []
+  modified:
+    - backend/routers/tasks.py (stub → wired)
+    - backend/tests/integration/test_api_integration.py (real task_id tests, +2 404 tests)

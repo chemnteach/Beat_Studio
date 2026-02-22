@@ -1,0 +1,108 @@
+---
+session: Beat_Studio
+date: 2026-02-22
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Set up development environment, fix LoRA trainer for per-image captions, import LoRAs and test song from SD card
+
+now: Ready for full video cycle testing on laptop (12GB VRAM)
+
+test: python -m pytest backend/tests/ -q
+
+done_this_session:
+  - task: Created venv and installed all dependencies (~4GB, 150+ packages)
+    files:
+      - venv/
+
+  - task: Fixed NumPy 2.x / ChromaDB 0.4.22 incompatibility
+    files: []
+    notes: Downgraded to numpy<2.0 to fix np.float_ deprecation error
+
+  - task: Verified all 505 tests pass (413 unit + 56 integration + 36 frontend)
+    files: []
+
+  - task: Added _load_caption() helper to read .txt sidecar files
+    files:
+      - backend/services/lora/trainer.py
+
+  - task: Modified _run_training() to use per-image captions instead of single trigger token
+    files:
+      - backend/services/lora/trainer.py
+
+  - task: Added write_captions() helper for dataset preparation
+    files:
+      - backend/services/lora/trainer.py
+
+  - task: Added 4 new tests for caption functionality
+    files:
+      - backend/tests/unit/test_lora_management.py
+
+  - task: Imported 12 LoRAs from SD card (organized by type)
+    files:
+      - output/loras/identity/nova_fade_id_v1.safetensors
+      - output/loras/style/crossfadeclub_style_v1.safetensors
+      - output/loras/style/70s-film-retro.safetensors
+      - output/loras/character/rob-character.safetensors
+      - output/loras/character/michele-character.safetensors
+      - output/loras/scene/beach-bar-exterior.safetensors
+      - output/loras/scene/beach-sunset.safetensors
+      - output/loras/scene/boat-deck.safetensors
+      - output/loras/scene/bonfire-beach.safetensors
+      - output/loras/scene/ocean-underwater.safetensors
+      - output/loras/scene/stage-performance.safetensors
+      - output/loras/scene/tiki-bar-interior.safetensors
+
+  - task: Updated loras.yaml registry with all 12 LoRAs and trigger tokens
+    files:
+      - backend/config/loras.yaml
+
+  - task: Imported test song
+    files:
+      - backend/data/uploads/5bb5790e-9a46-4bcd-987e-f1c82f33f7dd.wav
+
+blockers: []
+
+questions: []
+
+decisions:
+  - laptop_for_inference: Desktop GPU (Quadro M2000, 4GB) insufficient for SDXL; use laptop (12GB VRAM)
+  - all_loras_sdxl: All 12 LoRAs confirmed trained on SDXL Base 1.0
+
+findings:
+  - lora_structure: LoRAs use peft/diffusers format with base_model.model.down_blocks structure
+  - param_counts: Scene/character LoRAs have 2166 params, Nova Fade has 1120 params
+
+worked:
+  - numpy_downgrade: pip install "numpy<2.0" fixed ChromaDB compatibility
+
+failed: []
+
+next:
+  - Test LoRA inference on laptop: "rob_char, man standing on a beach, golden hour lighting"
+  - Run full video generation pipeline
+  - Test beat synchronization with imported song
+
+files:
+  created:
+    - output/loras/ (directory structure with 12 LoRA files)
+  modified:
+    - backend/services/lora/trainer.py
+    - backend/tests/unit/test_lora_management.py
+    - backend/config/loras.yaml
+    - thoughts/ledgers/CONTINUITY_CLAUDE-beat-studio.md
+
+lora_trigger_tokens:
+  nova_fade_id_v1: novafade_char
+  crossfadeclub_style_v1: crossfadeclub_style
+  70s-film-retro: 70s_film_style
+  rob-character: rob_char
+  michele-character: michele_char
+  beach-bar-exterior: beach_bar_ext
+  beach-sunset: beach_sunset
+  boat-deck: boat_deck
+  bonfire-beach: bonfire_beach
+  ocean-underwater: ocean_underwater
+  stage-performance: stage_perf
+  tiki-bar-interior: tiki_bar_int

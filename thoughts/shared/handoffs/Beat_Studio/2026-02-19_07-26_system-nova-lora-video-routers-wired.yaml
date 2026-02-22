@@ -1,0 +1,83 @@
+---
+session: Beat_Studio
+date: 2026-02-19
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Wire system/nova_fade/lora/video routers — 465 tests passing, all quick-win endpoints live
+
+now: Wire remaining stub endpoints OR generate Nova Fade canonical images (GPU session)
+
+test: cd /home/craig/AI_Workspace/synterra/Beat_Studio && python -m pytest backend/tests/ -q
+
+done_this_session:
+  - task: Wire system GET /models (reads checkpoints.yaml, checks HF cache paths)
+    files:
+      - backend/routers/system.py
+
+  - task: Wire nova_fade GET /status (reads constitution.yaml, counts canonical images, checks LoRA registry)
+    files:
+      - backend/routers/nova_fade.py
+
+  - task: Wire lora GET /list (LoRARegistry.list_all) + POST /recommend (tag-based filter)
+    files:
+      - backend/routers/lora.py
+
+  - task: Wire video POST /plan (BeatSynchronizer + ModelRouter + CostEstimator) + GET /styles + GET /backends
+    files:
+      - backend/routers/video.py
+
+  - task: Update integration tests for real video plan (add _real_analysis_id() helper, fix pipeline tests)
+    files:
+      - backend/tests/integration/test_api_integration.py
+
+  - task: Update CLAUDE.md to reflect partial wired status for video/lora/nova_fade
+    files:
+      - CLAUDE.md
+
+blockers: []
+
+questions:
+  - Nova Fade canonical image generation — needs GPU; skip for now or schedule dedicated session?
+  - Remaining video router stubs (generate, scene/edit) — wire to real VideoEngine when assembler is ready?
+  - LoRA /recommend — currently only returns on-disk matches; NarrativeArc pipeline needed for downloadable/trainable
+
+decisions:
+  - beat_sync_duck_typing: BeatSynchronizer expects .duration/.sections[.start/.end] not SongAnalysis.duration_sec/start_sec — use SimpleNamespace adapter in video router
+  - lora_recommend_simplified: Skip NarrativeArc/AnimationStyle pipeline for now; filter registry by style tag match
+  - nova_fade_lora_base_path: LoRA base_path set to project_root/output/loras (adjacent to Beat_Studio backend)
+  - background_tasks_synchronous_in_testclient: BackgroundTasks run synchronously before response in Starlette TestClient — analysis JSON is written by the time video plan is called
+  - _real_analysis_id_helper: Added to TestVideoRouter (mirrors _real_task_id pattern from tasks router)
+
+findings:
+  - beat_sync_min_duration_2s: _MIN_SCENE_DURATION=2.0 — 0.5s minimal WAV produces 1 scene (fallback whole-song scene), no crash
+  - SectionInfo_field_names: SectionInfo has start_sec/end_sec but BeatSynchronizer expects .start/.end — mismatch documented, adapter needed
+  - quality_tier_maps_to_scene_cap: basic=12, professional=24, cinematic=48 scenes max
+  - system_models_check_hf_cache: Checks ~/.cache/huggingface/hub/{cache_subdir} for HF models; local_only models assumed present
+  - nova_fade_constitution_version_1_0: Version "1.0" read from YAML, canonical dir is output/nova_fade/canonical/
+
+worked:
+  - SimpleNamespace adapter pattern to bridge SongAnalysis JSON → BeatSynchronizer duck-type
+  - Static helper pattern (_real_analysis_id) for tests needing pre-computed analysis
+  - Module-level singletons for BeatSynchronizer, ModelRouter, CostEstimator in video router
+  - LoRARegistry instantiated fresh per nova_fade /status call (no singleton — avoids stale registry)
+
+failed: []
+
+next:
+  - Generate Nova Fade canonical images (GPU session needed — SDXL with nova_fade_constitution prompts)
+  - Wire nova_fade /drift-test to real CLIP drift detection (open_clip installed?)
+  - Wire lora /recommend to full NarrativeArc pipeline for downloadable suggestions
+  - Wire video /generate to real VideoEngine assembler/encoder pipeline
+  - Consider making LoRARegistry a singleton in lora router (currently fresh per nova_fade call)
+
+files:
+  created: []
+  modified:
+    - backend/routers/system.py (GET /models wired to checkpoints.yaml + HF cache check)
+    - backend/routers/nova_fade.py (GET /status wired to constitution YAML + canonical dir + LoRA registry)
+    - backend/routers/lora.py (GET /list + POST /recommend wired to LoRARegistry; singleton pattern)
+    - backend/routers/video.py (POST /plan + GET /styles + GET /backends wired; SimpleNamespace adapter)
+    - backend/tests/integration/test_api_integration.py (_real_analysis_id helper; fixed 4 failing video tests)
+    - CLAUDE.md (updated service status table + integration test note)
