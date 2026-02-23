@@ -17,7 +17,7 @@ import { VideoStudio } from './components/VideoStudio';
 import { LoRAManager } from './components/LoRAManager';
 import { NovaFadeStudio } from './components/NovaFadeStudio';
 import { HardwareStatus } from './components/HardwareStatus';
-import type { SongAnalysis as SongAnalysisType } from './types';
+import type { SectionInfo, SongAnalysis as SongAnalysisType } from './types';
 import axios from 'axios';
 
 type Tab = 'upload' | 'mashup' | 'video' | 'lora' | 'system';
@@ -25,6 +25,7 @@ type Tab = 'upload' | 'mashup' | 'video' | 'lora' | 'system';
 interface AppState {
   audioId: string | null;
   analysis: SongAnalysisType | null;
+  sections: SectionInfo[] | null;   // user-edited sections from SongAnalysis
   mashupId: string | null;
 }
 
@@ -41,6 +42,7 @@ export default function App() {
   const [state, setState] = useState<AppState>({
     audioId: null,
     analysis: null,
+    sections: null,
     mashupId: null,
   });
   const [analyzing, setAnalyzing] = useState(false);
@@ -50,9 +52,15 @@ export default function App() {
     setAnalyzing(true);
     try {
       await axios.post('/api/audio/analyze', { audio_id: audioId });
-      // Poll for completion — simplified: in production use task polling
-      const { data } = await axios.get<SongAnalysisType>(`/api/audio/analysis/${audioId}`);
-      setState(prev => ({ ...prev, analysis: data }));
+      // Poll until analysis complete (background task)
+      for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const { data } = await axios.get<any>(`/api/audio/analysis/${audioId}`);
+        if (data.status === 'complete' && data.analysis) {
+          setState(prev => ({ ...prev, analysis: data.analysis }));
+          break;
+        }
+      }
     } catch { /* non-fatal */ } finally {
       setAnalyzing(false);
     }
@@ -98,6 +106,7 @@ export default function App() {
                 analysis={state.analysis}
                 onCreateVideo={() => setActiveTab('video')}
                 onCreateMashup={() => setActiveTab('mashup')}
+                onSectionsChange={sections => setState(prev => ({ ...prev, sections }))}
               />
             )}
           </div>
@@ -128,7 +137,8 @@ export default function App() {
             {state.audioId ? (
               <VideoStudio
                 audioId={state.audioId}
-                songTitle={state.analysis?.title}
+                analysis={state.analysis ?? undefined}
+                sections={state.sections ?? state.analysis?.sections ?? undefined}
                 onBack={() => setActiveTab('upload')}
               />
             ) : (

@@ -3,20 +3,24 @@ import { describe, it, expect, vi } from 'vitest'
 import { SongAnalysis } from './SongAnalysis'
 import type { SongAnalysis as SongAnalysisType } from '../types'
 
+const mockSection = (type: string, start: number, end: number) => ({
+  section_type: type, start_sec: start, end_sec: end,
+  duration_sec: end - start, energy_level: 0.5, spectral_centroid: 0,
+  tempo_stability: 0, vocal_density: 'medium', vocal_intensity: 0,
+  lyrical_content: '', emotional_tone: 'neutral', lyrical_function: 'narrative', themes: [],
+});
+
 const mockAnalysis: SongAnalysisType = {
   audio_id: 'test-001',
   title: 'Test Song',
   artist: 'Test Artist',
-  duration: 180,
+  duration_sec: 180,
   bpm: 128,
   key: 'G major',
   camelot: '9B',
   mood_summary: 'upbeat energetic',
-  energy: 0.8,
-  sections: [
-    { start: 0, end: 30, section_type: 'verse', energy_level: 0.5 },
-    { start: 30, end: 60, section_type: 'chorus', energy_level: 0.9 },
-  ],
+  energy_level: 0.8,
+  sections: [mockSection('verse', 0, 30), mockSection('chorus', 30, 60)],
   lyrics: 'Sample lyrics here',
   word_timings: [],
 }

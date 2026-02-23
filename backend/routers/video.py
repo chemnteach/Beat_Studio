@@ -296,6 +296,21 @@ def _run_generate_video(
         tm.fail_task(task_id, str(exc))
 
 
+class SectionOverride(BaseModel):
+    section_type: str
+    start_sec: float
+    end_sec: float
+    lyrical_content: str = ""
+
+
+class PromptsRequest(BaseModel):
+    audio_id: str
+    style: str = "cinematic"
+    quality: str = "professional"
+    creative_direction: str = ""
+    sections: Optional[List[SectionOverride]] = None   # user-edited sections from frontend
+
+
 class PlanRequest(BaseModel):
     audio_id: str
     style: str = "cinematic"
@@ -316,6 +331,103 @@ class SceneEditRequest(BaseModel):
     video_id: str
     scene_index: int
     new_prompt: str
+
+
+@router.post("/prompts")
+async def generate_prompts(request: PromptsRequest) -> Dict[str, Any]:
+    """Generate per-section AI prompts from narrative analysis.
+
+    Runs NarrativeAnalyzer (Claude) + ScenePromptGenerator synchronously.
+    Accepts optional user-edited sections with lyrical content to override
+    what's in the cached analysis JSON.
+    """
+    from backend.services.audio.types import SectionInfo, SceneTiming
+    from backend.services.prompt.narrative_analyzer import NarrativeAnalyzer
+    from backend.services.prompt.scene_generator import ScenePromptGenerator
+    from backend.services.prompt.style_mapper import StyleMapper
+
+    analysis = _load_full_analysis(request.audio_id)
+
+    # Override sections with user-edited versions if provided
+    if request.sections:
+        from backend.services.audio.types import SectionInfo as SI
+        analysis.sections = [
+            SI(
+                section_type=s.section_type,
+                start_sec=s.start_sec,
+                end_sec=s.end_sec,
+                duration_sec=s.end_sec - s.start_sec,
+                energy_level=0.5,
+                spectral_centroid=2000.0,
+                tempo_stability=0.8,
+                vocal_density="medium",
+                vocal_intensity=0.5,
+                lyrical_content=s.lyrical_content,
+                emotional_tone="neutral",
+                lyrical_function="narrative",
+                themes=[],
+            )
+            for s in request.sections
+        ]
+
+    # Scene timings from beat sync (one timing per section for the prompt stage)
+    sync_ns = _load_analysis_for_sync(request.audio_id)
+    beat_scenes = _get_beat_sync().create_scene_plan(sync_ns, quality_tier=request.quality)
+
+    scene_timings = [
+        SceneTiming(
+            scene_index=s.scene_index,
+            start_sec=s.start_sec,
+            end_sec=s.end_sec,
+            duration_sec=s.duration_sec,
+            is_hero=s.is_hero,
+            energy_level=1.0 if s.is_hero else 0.5,
+            section_type=_parse_section_type_from_notes(s.notes),
+            beat_aligned=True,
+        )
+        for s in beat_scenes
+    ]
+
+    try:
+        animation_style = StyleMapper().get_style(request.style)
+    except Exception:
+        animation_style = StyleMapper().get_style("cinematic")
+
+    narrative = NarrativeAnalyzer().analyze(
+        analysis,
+        user_concept=request.creative_direction or None,
+    )
+
+    scene_prompts = ScenePromptGenerator().generate_prompts(
+        narrative, scene_timings, animation_style, loras=[], user_overrides={},
+    )
+
+    return {
+        "overall_concept": narrative.overall_concept,
+        "color_palette":   narrative.color_palette,
+        "mood_progression": narrative.mood_progression,
+        "prompts": [
+            {
+                "scene_index":   sp.scene_index,
+                "section_type":  scene_timings[sp.scene_index].section_type if sp.scene_index < len(scene_timings) else "verse",
+                "start_sec":     sp.start_sec,
+                "end_sec":       sp.end_sec,
+                "duration_sec":  sp.duration_sec,
+                "is_hero":       sp.is_hero,
+                "positive":      sp.positive,
+                "negative":      sp.negative,
+                "transition":    sp.transition_hint,
+            }
+            for sp in scene_prompts
+        ],
+    }
+
+
+def _parse_section_type_from_notes(notes: str) -> str:
+    for stype in ("intro", "verse", "pre_chorus", "chorus", "bridge", "outro"):
+        if stype in notes.lower():
+            return stype
+    return "verse"
 
 
 @router.post("/plan")

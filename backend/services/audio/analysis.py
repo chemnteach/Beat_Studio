@@ -29,17 +29,44 @@ def detect_sections(
     """
     try:
         duration = librosa.get_duration(y=y, sr=sr)
-        adjusted = max(4, min(16, int(duration / 20)))
-
-        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-        boundaries = librosa.segment.agglomerative(chroma, adjusted)
+        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+        k = min(8, len(chroma[0]) // 10)
+        boundaries = librosa.segment.agglomerative(chroma, k)
         boundary_times = librosa.frames_to_time(boundaries, sr=sr)
 
-        sections = []
+        raw = []
         for i in range(len(boundary_times) - 1):
-            sections.append((float(boundary_times[i]), float(boundary_times[i + 1])))
-        logger.info("Detected %d sections", len(sections))
-        return sections
+            raw.append((float(boundary_times[i]), float(boundary_times[i + 1])))
+
+        # Extend last section to cover full duration (librosa may leave a tail)
+        if raw and raw[-1][1] < duration - 0.5:
+            raw[-1] = (raw[-1][0], float(duration))
+
+        # Merge sections shorter than MIN_SECTION_SEC into their longer neighbor.
+        # Process inner sections first, then check first/last.
+        MIN_SEC = 10.0
+        changed = True
+        while changed and len(raw) > 2:
+            changed = False
+            for i in range(1, len(raw) - 1):   # skip first and last
+                if raw[i][1] - raw[i][0] < MIN_SEC:
+                    prev_dur = raw[i - 1][1] - raw[i - 1][0]
+                    next_dur = raw[i + 1][1] - raw[i + 1][0]
+                    if next_dur >= prev_dur:
+                        raw = raw[:i] + [(raw[i][0], raw[i + 1][1])] + raw[i + 2:]
+                    else:
+                        raw = raw[:i - 1] + [(raw[i - 1][0], raw[i][1])] + raw[i + 1:]
+                    changed = True
+                    break
+
+        # Absorb a tiny first or last section into its neighbor
+        if len(raw) > 1 and raw[0][1] - raw[0][0] < MIN_SEC:
+            raw = [(raw[0][0], raw[1][1])] + raw[2:]
+        if len(raw) > 1 and raw[-1][1] - raw[-1][0] < MIN_SEC:
+            raw = raw[:-2] + [(raw[-2][0], raw[-1][1])]
+
+        logger.info("Detected %d sections (after merge)", len(raw))
+        return raw
 
     except Exception as exc:
         logger.error("Section detection failed: %s", exc)
@@ -50,22 +77,45 @@ def detect_sections(
                 for i in range(n_chunks)]
 
 
+# Pre-defined inner-section patterns (between intro and outro) for common counts.
+# Keyed by number of inner sections.
+_INNER_PATTERNS: dict = {
+    1: ["verse"],
+    2: ["verse", "chorus"],
+    3: ["verse", "chorus", "verse"],
+    4: ["verse", "chorus", "verse", "chorus"],
+    5: ["verse", "chorus", "verse", "chorus", "bridge"],
+    6: ["verse", "chorus", "verse", "chorus", "bridge", "verse"],
+    7: ["verse", "chorus", "verse", "chorus", "bridge", "verse", "chorus"],
+}
+
+
 def classify_section_type(
     section_idx: int,
     total_sections: int,
     energy_level: float,
     spectral_centroid: float,
 ) -> str:
-    """Classify section type from position and audio features."""
+    """Assign section type by position.
+
+    First section is always intro, last is always outro.
+    Inner sections use a pre-defined pattern scaled to the detected count.
+    """
+    if total_sections == 1:
+        return "verse"
     if section_idx == 0:
         return "intro"
     if section_idx == total_sections - 1:
         return "outro"
-    if energy_level > 0.6 and spectral_centroid > 2000:
-        return "chorus"
-    if energy_level < 0.3:
-        return "bridge"
-    return "verse"
+
+    n_inner = total_sections - 2
+    inner_idx = section_idx - 1
+
+    if n_inner in _INNER_PATTERNS:
+        return _INNER_PATTERNS[n_inner][inner_idx]
+
+    # > 7 inner sections: alternate verse/chorus
+    return "verse" if inner_idx % 2 == 0 else "chorus"
 
 
 def analyze_section_energy(
@@ -108,6 +158,124 @@ def analyze_section_energy(
     except Exception as exc:
         logger.error("Energy analysis failed: %s", exc)
         return {"energy_level": 0.0, "spectral_centroid": 0.0, "tempo_stability": 0.0}
+
+
+def _merge_two_sections(a: "SectionInfo", b: "SectionInfo") -> "SectionInfo":  # type: ignore[name-defined]
+    """Merge two adjacent sections into one, keeping the longer one's type."""
+    from backend.services.audio.types import SectionInfo
+    total = a.duration_sec + b.duration_sec
+    energy = (a.energy_level * a.duration_sec + b.energy_level * b.duration_sec) / total
+    centroid = (a.spectral_centroid * a.duration_sec + b.spectral_centroid * b.duration_sec) / total
+    longer = a if a.duration_sec >= b.duration_sec else b
+    vocal = "dense" if energy > 0.65 else ("medium" if energy > 0.30 else "sparse")
+    return SectionInfo(
+        section_type=longer.section_type,
+        start_sec=min(a.start_sec, b.start_sec),
+        end_sec=max(a.end_sec, b.end_sec),
+        duration_sec=total,
+        energy_level=energy,
+        spectral_centroid=centroid,
+        tempo_stability=(a.tempo_stability + b.tempo_stability) / 2,
+        vocal_density=vocal,
+        vocal_intensity=energy,
+        lyrical_content="",
+        emotional_tone="neutral",
+        lyrical_function="narrative",
+        themes=[],
+    )
+
+
+def _retype_section(sec: "SectionInfo", new_type: str) -> "SectionInfo":  # type: ignore[name-defined]
+    """Return a copy of sec with section_type replaced."""
+    from backend.services.audio.types import SectionInfo
+    return SectionInfo(
+        section_type=new_type,
+        start_sec=sec.start_sec,
+        end_sec=sec.end_sec,
+        duration_sec=sec.duration_sec,
+        energy_level=sec.energy_level,
+        spectral_centroid=sec.spectral_centroid,
+        tempo_stability=sec.tempo_stability,
+        vocal_density=sec.vocal_density,
+        vocal_intensity=sec.vocal_intensity,
+        lyrical_content=sec.lyrical_content,
+        emotional_tone=sec.emotional_tone,
+        lyrical_function=sec.lyrical_function,
+        themes=sec.themes,
+    )
+
+
+def post_process_sections(
+    sections: List,
+    total_duration: float,
+    min_sec: float = 12.0,
+) -> List:
+    """Merge tiny/adjacent-same-type sections and re-label with alternating pattern.
+
+    Steps:
+      1. Merge sections shorter than min_sec into their longer neighbor.
+      2. Merge consecutive sections of the same type.
+      3. Re-label inner sections using energy rank + verse/chorus alternation.
+    """
+    if len(sections) <= 1:
+        return sections
+
+    # ── Step 1: Absorb tiny sections ──────────────────────────────────────────
+    changed = True
+    while changed and len(sections) > 1:
+        changed = False
+        for i, sec in enumerate(sections):
+            if sec.duration_sec < min_sec:
+                if i < len(sections) - 1:
+                    sections = sections[:i] + [_merge_two_sections(sec, sections[i + 1])] + sections[i + 2:]
+                else:
+                    sections = sections[:i - 1] + [_merge_two_sections(sections[i - 1], sec)] + sections[i + 1:]
+                changed = True
+                break
+
+    # ── Step 2: Merge adjacent same-type sections ──────────────────────────────
+    changed = True
+    while changed and len(sections) > 1:
+        changed = False
+        for i in range(len(sections) - 1):
+            if sections[i].section_type == sections[i + 1].section_type:
+                sections = sections[:i] + [_merge_two_sections(sections[i], sections[i + 1])] + sections[i + 2:]
+                changed = True
+                break
+
+    if len(sections) <= 2:
+        return sections
+
+    # ── Step 3: Re-label inner sections ───────────────────────────────────────
+    inner = sections[1:-1]
+    if not inner:
+        return sections
+
+    energies = sorted(s.energy_level for s in inner)
+    median_e = energies[len(energies) // 2]
+
+    labeled: List = []
+    for sec in inner:
+        if sec.energy_level >= median_e:
+            new_type = "chorus"
+        elif sec.energy_level < median_e * 0.55:
+            new_type = "bridge"
+        else:
+            new_type = "verse"
+        labeled.append(_retype_section(sec, new_type))
+
+    # Ensure first inner section is verse, not chorus
+    if labeled and labeled[0].section_type == "chorus":
+        labeled[0] = _retype_section(labeled[0], "verse")
+
+    # Break up any run of 3+ same type by flipping the middle one
+    for i in range(1, len(labeled) - 1):
+        if (labeled[i - 1].section_type == labeled[i].section_type ==
+                labeled[i + 1].section_type):
+            flip = "verse" if labeled[i].section_type == "chorus" else "chorus"
+            labeled[i] = _retype_section(labeled[i], flip)
+
+    return [sections[0]] + labeled + [sections[-1]]
 
 
 def estimate_key(chroma: np.ndarray) -> str:

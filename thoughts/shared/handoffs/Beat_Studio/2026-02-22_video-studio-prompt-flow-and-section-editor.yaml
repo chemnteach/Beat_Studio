@@ -1,0 +1,91 @@
+---
+session: Beat_Studio
+date: 2026-02-22
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Wire Video Studio prompt generation flow and section editor with save/load
+
+now: Test full prompt generation in Video Studio — upload song, fill section editor with lyrics, hit Generate Prompts, verify Claude returns per-scene prompts
+
+test: cd /home/craig/AI_Workspace/synterra/Beat_Studio && python -m pytest backend/tests/unit/ -q
+
+done_this_session:
+  - task: Fix section detection — correct classify_section_type with intro/outro always pinned, inner sections from pre-defined patterns per count
+    files:
+      - backend/services/audio/analysis.py
+
+  - task: Add section editor to SongAnalysis — click "Edit Sections" to open table, editable type/start/end/lyrics per section, save/load as named JSON file
+    files:
+      - frontend/src/components/SongAnalysis.tsx
+      - frontend/src/types/index.ts
+      - frontend/src/components/SongAnalysis.test.tsx
+
+  - task: Fix frontend TypeScript types — SectionInfo and SongAnalysis fields updated to match backend (start_sec/end_sec/duration_sec/energy_level)
+    files:
+      - frontend/src/types/index.ts
+
+  - task: Wire section edits back to App state via onSectionsChange callback
+    files:
+      - frontend/src/App.tsx
+      - frontend/src/components/SongAnalysis.tsx
+
+  - task: Add POST /api/video/prompts endpoint — runs NarrativeAnalyzer (Claude) + ScenePromptGenerator, accepts user-edited sections with lyrical content
+    files:
+      - backend/routers/video.py
+
+  - task: Rebuild VideoStudio with prompts stage — style → generate prompts → review/edit per-scene prompts → plan → generate
+    files:
+      - frontend/src/components/VideoStudio.tsx
+
+blockers: []
+
+questions:
+  - Should edited sections be persisted back to the analysis JSON file on the backend, or keep them frontend-only?
+  - The /api/video/prompts endpoint is synchronous — for longer songs may need background task + polling
+  - LoRAManager embedded prop may not exist yet — needs checking before LoRA stage is reached
+
+decisions:
+  - classify_section_type_patterns: Pre-defined lookup table by n_inner_sections (1-7), first=intro always, last=outro always
+  - section_editor_save_load: Client-side JSON download/upload, no backend persistence needed
+  - prompts_stage_synchronous: NarrativeAnalyzer call is ~10s, acceptable as synchronous for now
+  - sections_pass_through: User-edited sections (with lyrical content) passed from SongAnalysis → App state → VideoStudio → /api/video/prompts
+
+findings:
+  - ts_types_mismatch: Frontend types/index.ts used start/end/duration/energy but backend sends start_sec/end_sec/duration_sec/energy_level — caused TS errors blocking compilation
+  - section_template_bug: Old classify_section_type indexed directly into 9-item template, so songs with <9 sections never got "outro"
+  - prompts_not_wired: creativeDirection was captured in UI but never sent to any endpoint — only used inside generate video worker
+  - lyrical_content_key: NarrativeAnalyzer._build_prompt uses s.lyrical_content — if user fills this in section editor, prompts are much richer
+
+worked:
+  - Minimal pre-defined inner patterns table is simple and correct for section labeling
+  - Client-side JSON save/load for section layouts avoids any backend complexity
+  - Passing sections as request body to /api/video/prompts lets user-entered lyrics flow into Claude's narrative analysis
+
+failed:
+  - First section detection fix attempt used post_process_sections with 12s min — absorbed intro into verse
+  - TypeScript compilation failures silently blocked Vite hot reload — button appeared missing
+
+next:
+  - Test full Video Studio prompt flow end-to-end with the Island Girl song
+  - Check LoRAManager embedded prop support
+  - Consider adding a "Regenerate" button on the prompts stage
+  - Wire edited prompts (user_overrides) through to /api/video/generate
+  - Phase 4 LoRA Management (registry, downloader, recommender) — paused since Phase 3
+
+files:
+  created:
+    - frontend/index.html
+    - frontend/src/main.tsx
+    - frontend/src/index.css
+    - frontend/src/components/ErrorBoundary.tsx
+    - scripts/test_lora_inference.py
+  modified:
+    - backend/routers/video.py
+    - backend/services/audio/analysis.py
+    - frontend/src/App.tsx
+    - frontend/src/components/SongAnalysis.tsx
+    - frontend/src/components/SongAnalysis.test.tsx
+    - frontend/src/components/VideoStudio.tsx
+    - frontend/src/types/index.ts

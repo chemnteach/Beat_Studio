@@ -6,10 +6,19 @@
 // ── Audio & Analysis ──────────────────────────────────────────────────────────
 
 export interface SectionInfo {
-  start: number;
-  end: number;
   section_type: string;
+  start_sec: number;
+  end_sec: number;
+  duration_sec: number;
   energy_level: number;
+  spectral_centroid: number;
+  tempo_stability: number;
+  vocal_density: string;
+  vocal_intensity: number;
+  lyrical_content: string;
+  emotional_tone: string;
+  lyrical_function: string;
+  themes: string[];
 }
 
 export interface WordTiming {
@@ -22,12 +31,12 @@ export interface SongAnalysis {
   audio_id: string;
   title: string;
   artist: string;
-  duration: number;
+  duration_sec: number;
   bpm: number;
   key: string;
   camelot: string;
   mood_summary: string;
-  energy: number;
+  energy_level: number;
   sections: SectionInfo[];
   lyrics: string;
   word_timings: WordTiming[];
