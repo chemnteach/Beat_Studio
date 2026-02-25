@@ -81,7 +81,7 @@ class TransitionEngine:
             :class:`TransitionConfig` with the selected type and duration.
         """
         duration = self._DEFAULT_DURATIONS.get(quality_tier, 0.75)
-        backend_name = getattr(backend, "name", lambda: "")()
+        backend_name = getattr(backend, "name", "")
 
         # SkyReels Diffusion Forcing stitching — highest quality
         if backend_name == "skyreels" and quality_tier in ("professional", "cinematic"):

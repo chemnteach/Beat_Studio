@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -90,7 +90,7 @@ class LoRARegistry:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
 
     @staticmethod
-    def _dict_to_entry(d: dict) -> LoRAEntry:
+    def _dict_to_entry(d: Dict[str, Any]) -> LoRAEntry:
         return LoRAEntry(
             name=d["name"],
             type=d["type"],
@@ -105,7 +105,7 @@ class LoRARegistry:
         )
 
     @staticmethod
-    def _entry_to_dict(e: LoRAEntry) -> dict:
+    def _entry_to_dict(e: LoRAEntry) -> Dict[str, Any]:
         return {
             "name": e.name,
             "type": e.type,

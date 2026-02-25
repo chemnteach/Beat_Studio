@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import yaml
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 logger = logging.getLogger("beat_studio.routers.system")
@@ -85,8 +85,4 @@ async def list_models() -> Dict[str, Any]:
 @router.post("/models/install", status_code=status.HTTP_202_ACCEPTED)
 async def install_model(request: InstallModelRequest) -> Dict[str, str]:
     """Download and install a recommended model."""
-    return {
-        "task_id": "stub",
-        "status": "queued",
-        "model": request.model_name,
-    }
+    raise HTTPException(status_code=501, detail="Model installation not yet implemented")

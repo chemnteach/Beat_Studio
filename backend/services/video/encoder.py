@@ -43,8 +43,8 @@ class VideoEncoder:
         broadcast → CRF 15, slow
 
     Platform presets:
-        tiktok/reels/shorts → 1080×1920, 5M video, 192k audio
-        youtube/standard    → 1920×1080, 8M video, 320k audio
+        tiktok/reels/shorts → 1080w×1920h (portrait), 5M video, 192k audio
+        youtube/standard    → 1920w×1080h (landscape), 8M video, 320k audio
 
     Heavy FFmpeg calls are in ``_run_ffmpeg()`` for easy mocking in tests.
 
@@ -65,12 +65,15 @@ class VideoEncoder:
         "broadcast": EncoderPreset(crf=15, preset="slow"),
     }
 
+    _PORTRAIT_PRESET  = PlatformPreset(resolution=(1080, 1920), video_bitrate="5M",  audio_bitrate="192k")
+    _LANDSCAPE_PRESET = PlatformPreset(resolution=(1920, 1080), video_bitrate="8M",  audio_bitrate="320k")
+
     _PLATFORM_PRESETS = {
-        "tiktok":   PlatformPreset(resolution=(1080, 1920), video_bitrate="5M",  audio_bitrate="192k"),
-        "reels":    PlatformPreset(resolution=(1080, 1920), video_bitrate="5M",  audio_bitrate="192k"),
-        "shorts":   PlatformPreset(resolution=(1080, 1920), video_bitrate="5M",  audio_bitrate="192k"),
-        "youtube":  PlatformPreset(resolution=(1920, 1080), video_bitrate="8M",  audio_bitrate="320k"),
-        "standard": PlatformPreset(resolution=(1920, 1080), video_bitrate="8M",  audio_bitrate="320k"),
+        "tiktok":   _PORTRAIT_PRESET,
+        "reels":    _PORTRAIT_PRESET,
+        "shorts":   _PORTRAIT_PRESET,
+        "youtube":  _LANDSCAPE_PRESET,
+        "standard": _LANDSCAPE_PRESET,
     }
 
     def get_preset(self, quality: str) -> EncoderPreset:
@@ -172,6 +175,13 @@ class VideoEncoder:
             "-c:a", "aac",
             output_path,
         ]
-        subprocess.run(cmd, check=True, capture_output=True)
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.decode(errors="replace").strip()
+            logger.error("FFmpeg encode failed (exit %d):\n%s", exc.returncode, stderr)
+            raise RuntimeError(
+                f"FFmpeg encode failed (exit {exc.returncode}): {stderr[-500:]}"
+            ) from exc
         logger.info("Encoded: %s → %s", input_path, output_path)
         return output_path

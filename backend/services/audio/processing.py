@@ -273,8 +273,7 @@ def export_audio(
     """Export pydub AudioSegment to file."""
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     if fmt == "mp3":
-        segment.export(output_path, format="mp3", bitrate="320k",
-                       parameters=["-q:a", "0"])
+        segment.export(output_path, format="mp3", bitrate="320k")
     elif fmt == "wav":
         segment.export(output_path, format="wav",
                        parameters=["-ac", "2", "-ar", str(sr)])

@@ -5,6 +5,7 @@ import logging
 import os
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlparse
 from urllib.request import urlretrieve
 
 from backend.services.lora.types import LoRAEntry, LoRASearchResult
@@ -77,7 +78,8 @@ class LoRADownloader:
         """
         dest_dir = self._base / lora_type
         dest_dir.mkdir(parents=True, exist_ok=True)
-        suffix = ".safetensors" if ".safetensors" in url else ".pt"
+        url_suffix = Path(urlparse(url).path).suffix.lower()
+        suffix = url_suffix if url_suffix in {".safetensors", ".pt", ".bin", ".ckpt"} else ".safetensors"
         dest_file = dest_dir / f"{name}{suffix}"
 
         local_path = self._download_file(url, str(dest_file))

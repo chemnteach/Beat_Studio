@@ -20,6 +20,10 @@ python -m pytest backend/tests/integration/ -q
 # Single test
 python -m pytest backend/tests/unit/test_audio_analyzer.py::TestAudioAnalyzer::test_basic_analysis -v
 
+# Lint / format
+ruff check .
+ruff format .
+
 # Frontend (from frontend/)
 npm install
 npm run dev        # dev server at localhost:5173
@@ -28,6 +32,7 @@ npm test -- --run  # Vitest, single pass
 # Environment validation
 python scripts/setup_check.py
 python scripts/setup_check.py --models  # model paths only
+python scripts/setup_check.py --quick   # skip slow model checks
 ```
 
 ## Architecture
@@ -42,6 +47,7 @@ python scripts/setup_check.py --models  # model paths only
 |---|---|---|
 | audio/ | `analyzer.py`, `types.py`, `analysis.py` | Wired |
 | mashup/ | `ingestion.py`, `memory.py`, `curator.py`, `engineer.py` | Wired |
+| prompt/ | `narrative_analyzer.py`, `scene_generator.py`, `style_mapper.py`, `prompt_composer.py` | Wired |
 | video/ | `backends/`, `beat_sync.py`, `assembler.py`, `encoder.py` | Partial (plan wired) |
 | lora/ | `registry.py`, `trainer.py`, `downloader.py`, `recommender.py` | Partial (list/recommend wired) |
 | nova_fade/ | `character.py`, `canonical_prompts.py`, `dj_video_generator.py` | Partial (status wired) |
@@ -146,6 +152,20 @@ The `_minimal_wav()` helper at the top of the integration test file generates a 
 Stubs still in place for heavy operations: `video/generate`, `video/scene/edit`, `lora/train`, `lora/download`, `nova_fade/generate-canonical`, `nova_fade/train-*`, `nova_fade/drift-test`, `nova_fade/dj-video`, and `system/models/install`. Integration tests for those endpoints test shape/status only.
 
 The `POST /api/video/plan` endpoint requires a cached analysis JSON (`backend/data/analysis/{audio_id}.json`). Tests that call this endpoint must upload + analyze first (the background task runs synchronously in TestClient so the JSON is written before the test gets the response). Use `TestVideoRouter._real_analysis_id(client)` as a helper.
+
+### Configuration
+
+All YAML config files live in `backend/config/`:
+
+| File | Purpose |
+|---|---|
+| `settings.yaml` | Main app config (audio, models, LLM, mashup, video, VRAM) |
+| `animation_styles.yaml` | 24 animation styles with prompt modifiers |
+| `checkpoints.yaml` | Model inventory with paths and VRAM requirements |
+| `loras.yaml` | LoRA registry (name, type, trigger, weight, source) |
+| `nova_fade_constitution.yaml` | Character constraints (expressions, gestures, forbidden) |
+
+`Config` in `backend/services/shared/config.py` loads env vars in priority order: `~/.claude/.env` (lowest) → `backend/.env` → process environment (highest). The primary LLM provider is Anthropic Claude; OpenAI is the fallback. Required API keys: `ANTHROPIC_API_KEY` (recommended), `OPENAI_API_KEY` (fallback), `RUNPOD_API_KEY` (cloud video generation).
 
 ## Constraints
 

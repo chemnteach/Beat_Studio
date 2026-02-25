@@ -31,6 +31,11 @@ from backend.services.mashup.memory import MashupLibrary
 
 logger = logging.getLogger("beat_studio.mashup.engineer")
 
+_SAMPLE_RATE = 44100          # Hz — must match AudioAnalyzer and AudioSegment export
+_STRETCH_MIN = 0.7            # pyrubberband lower bound for time-stretch ratio
+_STRETCH_MAX = 1.3            # pyrubberband upper bound for time-stretch ratio
+_HARMONY_ATTENUATION = 0.4   # harmony vocals blended at 40% volume under lead
+
 # ── exceptions ────────────────────────────────────────────────────────────────
 
 
@@ -74,8 +79,8 @@ def _calculate_stretch_ratio(source_bpm: float, target_bpm: float) -> float:
     if target_bpm <= 0 or source_bpm <= 0:
         return 1.0
     ratio = target_bpm / source_bpm
-    # Cap ratio (pyrubberband works best within 0.7-1.3)
-    return max(0.7, min(1.3, ratio))
+    # Cap ratio (pyrubberband works best within _STRETCH_MIN-_STRETCH_MAX)
+    return max(_STRETCH_MIN, min(_STRETCH_MAX, ratio))
 
 
 def _extract_section_audio(
@@ -166,9 +171,13 @@ def create_stem_swap_mashup(
     logger.info("Creating STEM_SWAP mashup")
 
     stem_names = ("vocals", "drums", "bass", "other")
+    if not stem_config:
+        raise EngineerError("stem_config must specify at least one stem-to-song mapping")
+    stem_config = dict(stem_config)  # work on a copy — don't mutate caller's dict
+    fallback = next(iter(stem_config.values()))
     for stem in stem_names:
         if stem not in stem_config:
-            stem_config[stem] = list(stem_config.values())[0]
+            stem_config[stem] = fallback
 
     # Load all unique songs
     unique_ids = set(stem_config.values())
@@ -242,9 +251,8 @@ def create_energy_matched_mashup(
     # Sort by energy descending
     all_sections.sort(key=lambda x: x[0].get("energy_level", 0), reverse=True)
 
-    # Build sequence by alternating sources
+    # Build sequence: take highest-energy sections across both songs
     sequence = []
-    used_a = used_b = 0
     for sec, source in all_sections:
         if len(sequence) >= max(len(sections_a), len(sections_b)):
             break
@@ -336,8 +344,8 @@ def create_theme_fusion_mashup(
     y_a, meta_a = _load_song_audio(song_a_id, library)
     y_b, meta_b = _load_song_audio(song_b_id, library)
 
-    def _matching(sections: List[Dict[str, Any]], theme: str) -> List[Dict[str, Any]]:
-        t_lower = theme.lower()
+    def _matching(sections: List[Dict[str, Any]], keyword: str) -> List[Dict[str, Any]]:
+        t_lower = keyword.lower()
         return [
             s for s in sections
             if any(t_lower in th.lower() for th in s.get("themes", []))
@@ -510,7 +518,7 @@ def create_role_aware_mashup(
         harmony_vocals = harmony_stems.get("vocals", np.zeros(0))
         if len(harmony_vocals) > 0 and len(lead_chunk) > 0:
             min_len = min(len(lead_chunk), len(harmony_vocals))
-            lead_chunk[:min_len] += harmony_vocals[:min_len] * 0.4
+            lead_chunk[:min_len] += harmony_vocals[:min_len] * _HARMONY_ATTENUATION
 
         if lead_sec and len(lead_chunk) > 0:
             sr = 44100

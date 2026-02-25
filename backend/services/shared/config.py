@@ -9,6 +9,7 @@ priority chain:
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,6 +17,7 @@ import yaml
 from dotenv import load_dotenv
 
 _config_instance: Optional["Config"] = None
+_config_lock = threading.Lock()
 
 
 class Config:
@@ -86,16 +88,21 @@ def get_config(config_path: Optional[str] = None) -> Config:
     On first call, ``config_path`` is required.  Subsequent calls may omit it
     and will return the existing instance.
 
+    Thread-safe: uses a module-level lock to prevent double-initialisation.
+
     Raises:
         RuntimeError: If called before the singleton is initialised.
     """
     global _config_instance
-    if _config_instance is None:
-        if config_path is None:
-            raise RuntimeError(
-                "Config not yet initialised — call get_config(config_path) first."
-            )
-        _config_instance = Config(config_path)
+    if _config_instance is not None:
+        return _config_instance
+    with _config_lock:
+        if _config_instance is None:
+            if config_path is None:
+                raise RuntimeError(
+                    "Config not yet initialised — call get_config(config_path) first."
+                )
+            _config_instance = Config(config_path)
     return _config_instance
 
 

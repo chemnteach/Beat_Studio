@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from backend.services.lora.registry import LoRARegistry
@@ -99,22 +99,22 @@ async def recommend_loras(request: RecommendRequest) -> Dict[str, Any]:
 @router.post("/train", status_code=status.HTTP_202_ACCEPTED)
 async def train_lora(request: TrainRequest) -> Dict[str, str]:
     """Start LoRA training as a background task."""
-    return {"task_id": "stub", "status": "queued", "output_name": request.output_name}
+    raise HTTPException(status_code=501, detail="LoRA training not yet implemented")
 
 
 @router.post("/download", status_code=status.HTTP_202_ACCEPTED)
 async def download_lora(request: DownloadRequest) -> Dict[str, str]:
     """Download a LoRA from HuggingFace or Civitai."""
-    return {"task_id": "stub", "status": "queued", "name": request.name}
+    raise HTTPException(status_code=501, detail="LoRA download not yet implemented")
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register_lora(request: RegisterRequest) -> Dict[str, str]:
     """Register an existing LoRA file in the registry."""
-    return {"name": request.name, "status": "registered"}
+    raise HTTPException(status_code=501, detail="LoRA registration not yet implemented")
 
 
 @router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_lora(name: str) -> None:
     """Remove a LoRA from the registry."""
-    return None
+    raise HTTPException(status_code=501, detail="LoRA deletion not yet implemented")

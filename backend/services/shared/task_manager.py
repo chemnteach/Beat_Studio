@@ -6,12 +6,16 @@ All task state survives server restarts.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
+import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStatus(str, Enum):
@@ -59,21 +63,48 @@ class TaskManager:
     )
     """
 
-    def __init__(self, db_path: str = "backend/tasks.db"):
-        self._db_path = db_path
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    # Absolute default so it resolves correctly regardless of process CWD.
+    _DEFAULT_DB = str(Path(__file__).parent.parent.parent / "tasks.db")
+
+    def __init__(self, db_path: Optional[str] = None):
+        self._db_path = db_path or self._DEFAULT_DB
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self.recover_stuck_tasks()
 
     # ── private ──────────────────────────────────────────────────────────────
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.execute(self._CREATE_TABLE)
+
+    def recover_stuck_tasks(self) -> int:
+        """Mark any tasks left running/pending from a previous server process as failed.
+
+        Called at startup so tasks never stay permanently stuck after a crash.
+        Returns the number of tasks recovered.
+        """
+        now = time.time()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """UPDATE tasks
+                   SET status='failed', error='Server restarted while task was in progress',
+                       updated_at=?
+                   WHERE status IN ('running', 'pending')""",
+                (now,),
+            )
+        count = cur.rowcount
+        if count:
+            logger.warning(
+                "Recovered %d stuck task(s) from previous server process.", count
+            )
+        return count
 
     @staticmethod
     def _row_to_state(row: sqlite3.Row) -> TaskState:
@@ -93,7 +124,6 @@ class TaskManager:
 
     def create_task(self, task_type: str, params: Dict[str, Any]) -> str:
         """Create a new task and return its ID."""
-        import time
         task_id = str(uuid.uuid4())
         now = time.time()
         with self._connect() as conn:
@@ -112,19 +142,17 @@ class TaskManager:
         percent: float,
         message: str,
     ) -> None:
-        """Update task progress and set status to RUNNING."""
-        import time
+        """Update task progress. Only transitions to RUNNING if still pending/running."""
         with self._connect() as conn:
             conn.execute(
                 """UPDATE tasks
                    SET status='running', stage=?, percent=?, message=?, updated_at=?
-                   WHERE task_id=?""",
+                   WHERE task_id=? AND status IN ('pending', 'running')""",
                 (stage, percent, message, time.time(), task_id),
             )
 
     def complete_task(self, task_id: str, result: Dict[str, Any]) -> None:
         """Mark task as complete and store result."""
-        import time
         with self._connect() as conn:
             conn.execute(
                 """UPDATE tasks
@@ -135,7 +163,6 @@ class TaskManager:
 
     def fail_task(self, task_id: str, error: str) -> None:
         """Mark task as failed and store error message."""
-        import time
         with self._connect() as conn:
             conn.execute(
                 """UPDATE tasks
@@ -146,7 +173,6 @@ class TaskManager:
 
     def cancel_task(self, task_id: str) -> None:
         """Cancel a task."""
-        import time
         with self._connect() as conn:
             conn.execute(
                 "UPDATE tasks SET status='cancelled', updated_at=? WHERE task_id=?",

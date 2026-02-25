@@ -4,9 +4,11 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import re
+import threading
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
@@ -24,10 +26,13 @@ _UPLOADS_DIR  = _BACKEND_DIR / "data" / "uploads"
 _ANALYSIS_DIR = _BACKEND_DIR / "data" / "analysis"
 
 _ALLOWED_SUFFIXES = {".mp3", ".wav", ".flac", ".m4a", ".ogg", ".aac"}
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
 
 # ── Module-level singletons (lazy init) ───────────────────────────────────────
 _task_manager: Optional[TaskManager] = None
 _analyzer: Optional[AudioAnalyzer] = None
+_analyzer_lock = threading.Lock()
 
 
 def _get_task_manager() -> TaskManager:
@@ -39,8 +44,11 @@ def _get_task_manager() -> TaskManager:
 
 def _get_analyzer() -> AudioAnalyzer:
     global _analyzer
-    if _analyzer is None:
-        _analyzer = AudioAnalyzer(sample_rate=44100, whisper_model="base")
+    if _analyzer is not None:
+        return _analyzer
+    with _analyzer_lock:
+        if _analyzer is None:
+            _analyzer = AudioAnalyzer(sample_rate=44100, whisper_model="base")
     return _analyzer
 
 
@@ -49,7 +57,7 @@ def _get_analyzer() -> AudioAnalyzer:
 
 class AnalyzeRequest(BaseModel):
     audio_id: str
-    depth: str = "standard"  # "basic" | "standard" | "full"
+    depth: Literal["basic", "standard", "full"] = "standard"
     artist: str = ""          # Optional; falls back to filename stem
     title: str = ""           # Optional; falls back to filename stem
 
@@ -127,6 +135,11 @@ async def upload_audio(file: UploadFile = File(...)) -> Dict[str, str]:
 
     dest = _UPLOADS_DIR / f"{audio_id}{suffix}"
     content = await file.read()
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large ({len(content) // (1024*1024)} MB). Maximum is 500 MB.",
+        )
     dest.write_bytes(content)
 
     # Sidecar: maps audio_id → original filename + absolute path
@@ -149,6 +162,12 @@ async def analyze_audio(
     Poll ``GET /api/tasks/{task_id}`` for progress or ``GET /analysis/{audio_id}``
     for the completed result.
     """
+    if not _UUID_RE.match(request.audio_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid audio_id format.",
+        )
+
     meta_path = _UPLOADS_DIR / f"{request.audio_id}.meta.json"
     if not meta_path.exists():
         raise HTTPException(
@@ -193,6 +212,12 @@ async def get_analysis(audio_id: str) -> AnalysisResponse:
     - ``"pending"``  — file uploaded but analysis not yet started/complete
     - 404            — ``audio_id`` not found at all
     """
+    if not _UUID_RE.match(audio_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid audio_id format.",
+        )
+
     # Fast path: analysis JSON exists
     analysis_file = _ANALYSIS_DIR / f"{audio_id}.json"
     if analysis_file.exists():

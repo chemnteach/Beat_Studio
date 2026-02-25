@@ -49,8 +49,8 @@ class BeatSynchronizer:
     """Ensures video scene boundaries align with musical structure.
 
     Scene boundaries are derived from the song's section structure.  The
-    number of scenes is capped per quality tier (basic=12, professional=24,
-    cinematic=48).  High-energy sections (chorus/drop) are flagged as hero
+    number of scenes is capped per quality tier (basic=12, professional=40,
+    cinematic=60).  High-energy sections (chorus/drop) are flagged as hero
     scenes.
 
     Usage::

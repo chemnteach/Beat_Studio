@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from fastapi import APIRouter, BackgroundTasks, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from pydantic import BaseModel
 
 from backend.services.lora.registry import LoRARegistry
@@ -36,7 +36,7 @@ _vram_manager: Optional[VRAMManager] = None
 def _get_task_manager() -> TaskManager:
     global _task_manager
     if _task_manager is None:
-        _task_manager = TaskManager()
+        _task_manager = TaskManager(db_path=str(_BACKEND_DIR / "tasks.db"))
     return _task_manager
 
 
@@ -262,22 +262,13 @@ async def train_style_lora(
 @router.post("/drift-test")
 async def run_drift_test(request: DriftTestRequest) -> Dict[str, Any]:
     """Run CLIP-based drift detection on a Nova Fade LoRA checkpoint."""
-    return {
-        "task_id": "stub",
-        "status": "queued",
-        "lora_path": request.lora_path,
-    }
+    raise HTTPException(status_code=501, detail="Drift test not yet implemented")
 
 
 @router.post("/dj-video", status_code=status.HTTP_202_ACCEPTED)
 async def generate_dj_video(request: DJVideoRequest) -> Dict[str, str]:
     """Generate a Nova Fade DJ performance video for a mashup."""
-    return {
-        "task_id": "stub",
-        "status": "queued",
-        "mashup_id": request.mashup_id,
-        "theme": request.theme,
-    }
+    raise HTTPException(status_code=501, detail="DJ video generation not yet implemented")
 
 
 @router.get("/status")

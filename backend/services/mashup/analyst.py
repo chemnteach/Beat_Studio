@@ -6,7 +6,7 @@ the result into MashupLibrary. Ported from AI_Mixer mixer/agents/analyst.py.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from backend.services.audio.analyzer import AudioAnalyzer
@@ -52,7 +52,7 @@ def profile_audio(
         metadata["path"] = file_path
         metadata["artist"] = artist
         metadata["title"] = title
-        metadata["date_added"] = datetime.utcnow().isoformat()
+        metadata["date_added"] = datetime.now(timezone.utc).isoformat()
         metadata["sample_rate"] = analysis.sample_rate
 
         # Store in ChromaDB
@@ -63,7 +63,7 @@ def profile_audio(
             artist=artist,
             title=title,
             metadata=metadata,
-            transcript=f"{transcript}\n\n[MOOD]: {metadata.get('mood_summary', '')}",
+            transcript=transcript,  # upsert_song appends [MOOD] internally from metadata
             force_id=song_id,
         )
 

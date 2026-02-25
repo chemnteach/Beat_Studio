@@ -15,10 +15,13 @@ from __future__ import annotations
 
 import gc
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Any, Optional
 
 logger = logging.getLogger("beat_studio.vram_manager")
+
+_BYTES_PER_GB = 1024 ** 3
 
 # ── optional torch import ─────────────────────────────────────────────────────
 try:
@@ -61,6 +64,7 @@ class VRAMManager:
         self.baseline_threshold_gb = baseline_threshold_gb
         self._current_pipeline: Any = None
         self._current_model_name: Optional[str] = None
+        self._lock = threading.Lock()
 
     # ── public ───────────────────────────────────────────────────────────────
 
@@ -69,17 +73,26 @@ class VRAMManager:
         return self._current_model_name
 
     def set_pipeline(self, pipeline: Any, model_name: str) -> None:
-        """Register a newly loaded pipeline.  Kills any existing pipeline first."""
-        if self._current_pipeline is not None:
-            logger.info("Killing existing pipeline '%s' before loading '%s'",
-                        self._current_model_name, model_name)
-            self.kill()
-        self._current_pipeline = pipeline
-        self._current_model_name = model_name
-        logger.info("Pipeline '%s' registered in VRAMManager.", model_name)
+        """Register a newly loaded pipeline.  Kills any existing pipeline first.
+
+        Thread-safe: only one model can be loaded at a time.
+        """
+        with self._lock:
+            if self._current_pipeline is not None:
+                logger.info("Killing existing pipeline '%s' before loading '%s'",
+                            self._current_model_name, model_name)
+                self._kill_locked()
+            self._current_pipeline = pipeline
+            self._current_model_name = model_name
+            logger.info("Pipeline '%s' registered in VRAMManager.", model_name)
 
     def kill(self) -> None:
-        """Release all GPU resources for the current pipeline.
+        """Release all GPU resources for the current pipeline. Thread-safe."""
+        with self._lock:
+            self._kill_locked()
+
+    def _kill_locked(self) -> None:
+        """Internal kill — must be called with self._lock held.
 
         Sequence (matches BeatCanvas's validated kill order):
         1. unload_lora_weights()  — prevent weight contamination
@@ -149,17 +162,20 @@ class VRAMManager:
 
         try:
             props = torch.cuda.get_device_properties(0)
-            total = props.total_memory / (1024 ** 3)
-            allocated = torch.cuda.memory_allocated(0) / (1024 ** 3)
-            free = total - allocated
+            total = props.total_memory / _BYTES_PER_GB
+            # Use memory_reserved (what PyTorch has claimed from CUDA) rather than
+            # memory_allocated (active tensors only) — reserved stays held after
+            # empty_cache() until the OS reclaims it, giving a truer pressure picture.
+            reserved = torch.cuda.memory_reserved(0) / _BYTES_PER_GB
+            free = total - reserved
         except Exception:
-            total = free = allocated = 0.0
+            total = free = reserved = 0.0
 
         return VRAMStatus(
             cuda_available=True,
             total_gb=round(total, 2),
             free_gb=round(free, 2),
-            used_gb=round(allocated, 2),
+            used_gb=round(reserved, 2),
             current_model=self._current_model_name,
             baseline_ok=free >= self.baseline_threshold_gb,
         )

@@ -55,7 +55,7 @@ def _get_cost_estimator() -> CostEstimator:
 def _get_task_manager() -> TaskManager:
     global _task_manager
     if _task_manager is None:
-        _task_manager = TaskManager()
+        _task_manager = TaskManager(db_path=str(_BACKEND_DIR / "tasks.db"))
     return _task_manager
 
 
@@ -598,12 +598,10 @@ async def generate_video(
     background_tasks: BackgroundTasks,
 ) -> Dict[str, str]:
     """Start video generation as a background task."""
-    # Use style/quality/resolution from the GenerateRequest if available,
-    # otherwise fall back to sensible defaults.
-    style = getattr(request, "style", "cinematic")
-    quality = getattr(request, "quality", "professional")
-    raw_res = getattr(request, "resolution", [1920, 1080])
-    resolution: Tuple[int, int] = (raw_res[0], raw_res[1]) if raw_res else (1920, 1080)
+    style = request.style
+    quality = request.quality
+    raw_res = request.resolution
+    resolution: Tuple[int, int] = (raw_res[0], raw_res[1])
 
     task_id = _get_task_manager().create_task("generate_video", {
         "audio_id": request.audio_id,
@@ -613,7 +611,7 @@ async def generate_video(
     })
     background_tasks.add_task(
         _run_generate_video, task_id, request.audio_id, style, quality, resolution,
-        getattr(request, "creative_direction", ""),
+        request.creative_direction,
         request.scene_indices or None,
         request.user_overrides or {},
         request.lora_names or None,
@@ -624,12 +622,7 @@ async def generate_video(
 @router.post("/scene/edit", status_code=status.HTTP_202_ACCEPTED)
 async def edit_scene(request: SceneEditRequest) -> Dict[str, Any]:
     """Edit a single scene prompt and regenerate that scene."""
-    return {
-        "task_id":     "stub",
-        "video_id":    request.video_id,
-        "scene_index": request.scene_index,
-        "status":      "queued",
-    }
+    raise HTTPException(status_code=501, detail="Scene editing not yet implemented")
 
 
 @router.get("/styles")
@@ -711,18 +704,25 @@ async def list_clip_frames(video_id: Optional[str] = None):
 @router.get("/frames/{filename}")
 async def serve_clip_frame(filename: str):
     """Serve a single extracted frame PNG."""
-    frames_dir = _BACKEND_DIR.parent / "output" / "video" / "clips" / "frames"
-    path = frames_dir / filename
-    if not path.exists() or path.suffix.lower() != ".png":
+    frames_dir = (_BACKEND_DIR.parent / "output" / "video" / "clips" / "frames").resolve()
+    path = (frames_dir / filename).resolve()
+    if not path.is_relative_to(frames_dir) or not path.exists() or path.suffix.lower() != ".png":
         raise HTTPException(status_code=404, detail=f"Frame {filename} not found")
     return FileResponse(str(path), media_type="image/png")
+
+
+_ALLOWED_PLATFORMS = {"youtube", "instagram", "tiktok"}
+_VIDEO_OUTPUT_DIR = None  # resolved lazily after _BACKEND_DIR is set
 
 
 @router.get("/download/{video_id}")
 async def download_video(video_id: str, platform: str = "youtube"):
     """Download a generated video by ID."""
-    final = _BACKEND_DIR.parent / "output" / "video" / video_id / "final.mp4"
-    if not final.exists():
+    if platform not in _ALLOWED_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"Invalid platform. Allowed: {sorted(_ALLOWED_PLATFORMS)}")
+    video_root = (_BACKEND_DIR.parent / "output" / "video").resolve()
+    final = (video_root / video_id / "final.mp4").resolve()
+    if not final.is_relative_to(video_root) or not final.exists():
         raise HTTPException(status_code=404, detail=f"Video {video_id} not found")
     return FileResponse(
         str(final),

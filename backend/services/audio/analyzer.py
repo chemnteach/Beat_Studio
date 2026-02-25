@@ -77,7 +77,8 @@ def _analyze_signal_basic(y: np.ndarray, sr: int) -> Dict[str, Any]:
     camelot = key_to_camelot(key)
 
     rms = librosa.feature.rms(y=y)[0]
-    energy_level = float(np.mean(rms))
+    # Normalize RMS to [0, 1]: 0.1 RMS ≈ loud music; clip above 1.0
+    energy_level = float(min(np.mean(rms) / 0.1, 1.0))
 
     duration = librosa.get_duration(y=y, sr=sr)
 
@@ -157,8 +158,8 @@ class AudioAnalyzer:
         meta     = az.get_mashup_metadata(analysis)  # ChromaDB-ready dict
     """
 
-    #: Hero scene threshold — top N% by energy are flagged is_hero=True
-    HERO_ENERGY_PERCENTILE = 0.75
+    #: Hero scene threshold — sections above this percentile (0-100) are flagged is_hero=True
+    HERO_ENERGY_PERCENTILE_PCT = 75
 
     #: Fallback scene duration when there are no sections at all
     FALLBACK_SCENE_SEC = 4.0
@@ -170,6 +171,7 @@ class AudioAnalyzer:
     ):
         self.sample_rate = sample_rate
         self.whisper_model = whisper_model
+        self._whisper_model_instance = None  # loaded lazily, cached for reuse
 
     # ── public: analyze ───────────────────────────────────────────────────────
 
@@ -309,7 +311,7 @@ class AudioAnalyzer:
 
         # Compute hero threshold from section energies
         energies = [s.energy_level for s in analysis.sections]
-        hero_threshold = float(np.percentile(energies, self.HERO_ENERGY_PERCENTILE * 100))
+        hero_threshold = float(np.percentile(energies, self.HERO_ENERGY_PERCENTILE_PCT))
 
         # Build raw scenes from sections, splitting long ones
         raw_scenes: List[Dict[str, Any]] = []
@@ -395,7 +397,9 @@ class AudioAnalyzer:
         if whisper is None:  # pragma: no cover
             return {"transcript": "", "word_timings": [], "has_vocals": False}
         try:
-            model = whisper.load_model(self.whisper_model)
+            if self._whisper_model_instance is None:
+                self._whisper_model_instance = whisper.load_model(self.whisper_model)
+            model = self._whisper_model_instance
             result = model.transcribe(audio_path, word_timestamps=True)
             transcript = result.get("text", "").strip()
             has_vocals = bool(transcript)

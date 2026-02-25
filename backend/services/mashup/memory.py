@@ -8,11 +8,16 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("beat_studio.mashup.memory")
+
+# Absolute default so it resolves correctly regardless of process CWD.
+_DEFAULT_CHROMA_DIR = str(
+    Path(__file__).parent.parent.parent / "data" / "library_cache" / "chroma"
+)
 
 try:
     import chromadb
@@ -23,13 +28,16 @@ except ImportError:  # pragma: no cover
     chromadb = None  # type: ignore[assignment]
 
 
+# RRF tuning constant — standard literature value; higher k reduces the impact of top-rank items
+_RRF_K = 60
+
 # ── exceptions ────────────────────────────────────────────────────────────────
 
 class SchemaError(Exception):
     """Schema validation failure."""
 
 
-class MemoryError(Exception):
+class LibraryError(Exception):
     """ChromaDB operation failure."""
 
 
@@ -128,9 +136,9 @@ class MashupLibrary:
         collection_name: str = COLLECTION_NAME,
     ):
         if not _HAS_CHROMA:  # pragma: no cover
-            raise MemoryError("chromadb not installed — run: pip install chromadb==0.4.22")
+            raise LibraryError("chromadb not installed — run: pip install chromadb==0.4.22")
         if persist_directory is None:
-            persist_directory = "backend/data/library_cache/chroma"
+            persist_directory = _DEFAULT_CHROMA_DIR
         Path(persist_directory).mkdir(parents=True, exist_ok=True)
         self._client = chromadb.PersistentClient(
             path=persist_directory,
@@ -173,7 +181,7 @@ class MashupLibrary:
 
         if "date_added" not in metadata:
             metadata = dict(metadata)
-            metadata["date_added"] = datetime.utcnow().isoformat()
+            metadata["date_added"] = datetime.now(timezone.utc).isoformat()
 
         mood = metadata.get("mood_summary", "")
         document = f"{transcript}\n\n[MOOD]: {mood}".strip()
@@ -203,7 +211,7 @@ class MashupLibrary:
                 "document": result["documents"][0],
             }
         except Exception as exc:
-            raise MemoryError(f"get_song failed: {exc}") from exc
+            raise LibraryError(f"get_song failed: {exc}") from exc
 
     def delete_song(self, song_id: str) -> bool:
         """Delete a song. Returns True if deleted, False if not found."""
@@ -297,7 +305,8 @@ class MashupLibrary:
                 output.append({
                     "id": song_id,
                     "metadata": _deserialize_metadata(meta),
-                    "compatibility_score": round(1.0 - float(dist), 3),
+                    # ChromaDB cosine distance is in [0, 2]; normalize to [0, 1]
+                    "compatibility_score": round((2.0 - float(dist)) / 2.0, 3),
                 })
             return output[:max_results]
         except Exception as exc:
@@ -318,9 +327,13 @@ class MashupLibrary:
             target_song_id: The song we're matching against.
             max_results: Number of results to return.
         """
+        if abs(harmonic_weight + semantic_weight - 1.0) > 1e-6:
+            raise ValueError(
+                f"harmonic_weight + semantic_weight must equal 1.0, got {harmonic_weight + semantic_weight:.4f}"
+            )
         target = self.get_song(target_song_id)
         if target is None:
-            raise MemoryError(f"Song not found: {target_song_id}")
+            raise LibraryError(f"Song not found: {target_song_id}")
 
         meta = target["metadata"]
         bpm = meta.get("bpm", 120.0) or 120.0
@@ -342,12 +355,11 @@ class MashupLibrary:
 
         # Reciprocal Rank Fusion
         rrf_scores: Dict[str, float] = {}
-        k = 60
 
         for rank, song in enumerate(harmonic):
-            rrf_scores[song["id"]] = rrf_scores.get(song["id"], 0) + harmonic_weight / (k + rank + 1)
+            rrf_scores[song["id"]] = rrf_scores.get(song["id"], 0) + harmonic_weight / (_RRF_K + rank + 1)
         for rank, song in enumerate(semantic):
-            rrf_scores[song["id"]] = rrf_scores.get(song["id"], 0) + semantic_weight / (k + rank + 1)
+            rrf_scores[song["id"]] = rrf_scores.get(song["id"], 0) + semantic_weight / (_RRF_K + rank + 1)
 
         # Merge metadata
         id_to_song: Dict[str, Dict[str, Any]] = {}

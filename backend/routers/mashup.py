@@ -6,6 +6,7 @@ import logging
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from pydantic import BaseModel
@@ -33,6 +34,12 @@ router = APIRouter()
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _BACKEND_DIR  = Path(__file__).parent.parent
 _MASHUPS_DIR  = _BACKEND_DIR / "data" / "mashups"
+_MAX_BATCH_SIZE = 50
+_ALLOWED_URL_SCHEMES = {"http", "https"}
+_ALLOWED_URL_HOSTS = {
+    "www.youtube.com", "youtube.com", "youtu.be",
+    "music.youtube.com",
+}
 
 # ── Module-level singletons (lazy init) ───────────────────────────────────────
 _task_manager: Optional[TaskManager] = None
@@ -213,16 +220,37 @@ def _run_create_mashup(
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
+def _validate_ingest_source(source: str) -> None:
+    """Reject local filesystem paths and non-YouTube URLs."""
+    parsed = urlparse(source)
+    if parsed.scheme in ("", "file"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Local file paths are not accepted. Provide a YouTube URL.",
+        )
+    if parsed.scheme not in _ALLOWED_URL_SCHEMES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported URL scheme '{parsed.scheme}'. Only http/https YouTube URLs are accepted.",
+        )
+    if parsed.netloc not in _ALLOWED_URL_HOSTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported host '{parsed.netloc}'. Only YouTube URLs are accepted.",
+        )
+
+
 @router.post("/ingest", status_code=status.HTTP_202_ACCEPTED)
 async def ingest_song_endpoint(
     request: IngestRequest,
     background_tasks: BackgroundTasks,
 ) -> Dict[str, str]:
-    """Queue ingestion of a song from a local file or YouTube URL.
+    """Queue ingestion of a song from a YouTube URL.
 
     The song is downloaded/converted, analyzed (BPM/key/mood), and indexed in
     the ChromaDB library.  Poll ``GET /api/tasks/{task_id}`` for progress.
     """
+    _validate_ingest_source(request.source)
     task_id = _get_task_manager().create_task(
         task_type="song_ingest",
         params={"source": request.source},
@@ -242,7 +270,14 @@ async def ingest_batch(
     sources: List[str],
     background_tasks: BackgroundTasks,
 ) -> Dict[str, Any]:
-    """Queue batch ingestion of multiple songs."""
+    """Queue batch ingestion of multiple songs (max 50)."""
+    if len(sources) > _MAX_BATCH_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Too many sources ({len(sources)}). Maximum batch size is {_MAX_BATCH_SIZE}.",
+        )
+    for source in sources:
+        _validate_ingest_source(source)
     task_ids = []
     for source in sources:
         task_id = _get_task_manager().create_task(

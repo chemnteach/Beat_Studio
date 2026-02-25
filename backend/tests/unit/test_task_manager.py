@@ -74,11 +74,22 @@ class TestTaskPersistence:
         task_id = mgr1.create_task("video_generation", {"key": "value"})
         mgr1.update_progress(task_id, "generating", 25.0, "In progress")
 
-        # New instance — simulates server restart
+        # New instance — simulates server restart; crash recovery marks it failed
         mgr2 = TaskManager(db_path=db_path)
         state = mgr2.get_status(task_id)
-        assert state.status == TaskStatus.RUNNING
-        assert state.percent == 25.0
+        assert state.status == TaskStatus.FAILED
+        assert "restarted" in state.error.lower()
+
+    def test_completed_task_not_recovered(self, tmp_dir):
+        db_path = str(tmp_dir / "tasks.db")
+        mgr1 = TaskManager(db_path=db_path)
+        task_id = mgr1.create_task("audio_analysis", {})
+        mgr1.complete_task(task_id, {"result": "ok"})
+
+        # Completed tasks must not be touched by crash recovery
+        mgr2 = TaskManager(db_path=db_path)
+        state = mgr2.get_status(task_id)
+        assert state.status == TaskStatus.COMPLETE
 
     def test_get_missing_task_returns_none(self, task_db):
         assert task_db.get_status("nonexistent-id-xyz") is None
