@@ -7,10 +7,20 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from dotenv import load_dotenv
 
 from backend.services.audio.types import SongAnalysis
 from backend.services.prompt.types import NarrativeArc, NarrativeSection
+
+# Load ~/.claude/.env so ANTHROPIC_API_KEY is available even when uvicorn is
+# started without it exported in the shell.  override=False means an already-set
+# variable always wins.
+load_dotenv(Path.home() / ".claude" / ".env", override=False)
+load_dotenv(Path(__file__).parent.parent.parent.parent / "backend" / ".env", override=False)
 
 logger = logging.getLogger("beat_studio.prompt.narrative_analyzer")
 
@@ -49,9 +59,18 @@ class NarrativeAnalyzer:
         prompt = self._build_prompt(analysis, user_concept)
         try:
             raw = self._call_llm(prompt)
-            return self._parse_response(raw, analysis)
+            arc = self._parse_response(raw, analysis)
+            logger.info(
+                "NarrativeAnalyzer: LLM succeeded — %d sections, concept=%r",
+                len(arc.sections), arc.overall_concept[:60],
+            )
+            return arc
         except Exception as exc:
-            logger.warning("LLM call failed (%s) — using heuristic fallback", exc)
+            logger.warning(
+                "NarrativeAnalyzer: LLM call failed (%s) — using heuristic fallback. "
+                "Check ANTHROPIC_API_KEY and increase max_tokens if needed.",
+                exc,
+            )
             return self._fallback_arc(analysis)
 
     # ── internal: LLM call ────────────────────────────────────────────────────
@@ -59,37 +78,49 @@ class NarrativeAnalyzer:
     def _build_prompt(self, analysis: SongAnalysis, user_concept: Optional[str]) -> str:
         sections_summary = "\n".join(
             f"  Section {i} ({s.section_type}, {s.start_sec:.0f}s-{s.end_sec:.0f}s, "
-            f"energy={s.energy_level:.2f}, tone={s.emotional_tone}): '{s.lyrical_content[:80]}'"
+            f"energy={s.energy_level:.2f}, tone={s.emotional_tone}): '{s.lyrical_content[:120]}'"
             for i, s in enumerate(analysis.sections)
         )
-        user_dir = f"\nUser creative direction: {user_concept}" if user_concept else ""
+        user_dir = (
+            f"\n\nCREATIVE DIRECTION (prioritise this above all else):\n{user_concept}"
+            if user_concept else ""
+        )
 
-        return f"""You are a creative director for music videos. Analyze this song and create a visual narrative arc.
+        return f"""You are a music video creative director writing shot-by-shot visual descriptions for an AI video generation pipeline.
 
 Song: {analysis.artist} - {analysis.title}
-BPM: {analysis.bpm:.0f}, Key: {analysis.key}
-Mood: {analysis.mood_summary}
-Genre: {analysis.primary_genre}
+BPM: {analysis.bpm:.0f}, Key: {analysis.key}, Genre: {analysis.primary_genre}
+Overall mood: {analysis.mood_summary}
 Emotional arc: {analysis.emotional_arc}
-Transcript excerpt: {analysis.transcript[:300]}
+Lyric excerpt (context only): {analysis.transcript[:400]}
 {user_dir}
 
-Sections:
+Sections and their lyrics (use lyrics to understand meaning and emotion — do NOT copy them into output):
 {sections_summary}
 
-Create a visual narrative arc that tells the story of this song through video.
-Return JSON with this exact structure:
+INSTRUCTIONS:
+- For each section write a "visual_description": describe what the camera sees in cinematic language.
+  Use concrete details: location, subject, action, lighting, camera angle, colour temperature.
+  Example: "Wide shot — Rob stands at a sun-drenched airport departure gate, suit jacket over his shoulder, staring at the tarmac through floor-to-ceiling glass. Warm golden light, 35mm grain."
+  NEVER quote or paraphrase lyrics in visual_description.
+- For "key_lyric": copy the single most visually evocative line from that section's lyrics above (one line only).
+- For "themes": list 2-4 concrete visual motifs (e.g. "airport terminal", "golden hour", "solitude").
+- overall_concept: one sentence capturing the whole video's visual story.
+- mood_progression: one sentence describing how the emotion shifts across the song.
+- color_palette: 3-5 dominant colour descriptors for the whole video.
+
+Return ONLY valid JSON — no markdown fences, no commentary:
 {{
-  "overall_concept": "One sentence describing the visual narrative",
+  "overall_concept": "One sentence describing the complete visual narrative",
   "color_palette": ["color1", "color2", "color3"],
-  "mood_progression": "Brief description of mood progression",
-  "visual_style_hint": "Cinematic style description",
+  "mood_progression": "How the emotional tone evolves across the song",
+  "visual_style_hint": "Cinematic style descriptor",
   "sections": [
     {{
       "section_index": 0,
-      "visual_description": "Detailed scene description for video generation",
-      "key_lyric": "The most visually evocative lyric",
-      "themes": ["theme1", "theme2"]
+      "visual_description": "Cinematic scene description — what the camera sees, not what the lyrics say",
+      "key_lyric": "One evocative line copied verbatim from the section lyrics",
+      "themes": ["concrete visual motif", "another motif"]
     }}
   ]
 }}"""
@@ -106,7 +137,7 @@ Return JSON with this exact structure:
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=2048,
+            max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         )
         text = message.content[0].text
@@ -159,7 +190,7 @@ Return JSON with this exact structure:
                 emotional_tone=sec_info.emotional_tone,
                 energy_level=sec_info.energy_level,
                 is_climax=sec_info.section_type == "chorus" and sec_info.energy_level > 0.7,
-                key_lyric=raw_sec.get("key_lyric", sec_info.lyrical_content[:60]),
+                key_lyric=raw_sec.get("key_lyric", ""),
                 themes=raw_sec.get("themes", sec_info.themes),
             ))
 

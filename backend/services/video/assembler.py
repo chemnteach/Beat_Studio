@@ -116,21 +116,40 @@ class VideoAssembler:
         out_path = Path(output_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write concat list — ffmpeg concat demuxer format
+        # Write concat list — ffmpeg concat demuxer format.
+        # MUST use absolute paths: ffmpeg resolves relative paths in concat.txt
+        # relative to the concat file's directory, not the process CWD.
         concat_file = out_path.parent / "concat.txt"
         concat_file.write_text(
-            "".join(f"file '{c.file_path}'\nduration {c.duration_sec}\n" for c in clips)
+            "".join(
+                f"file '{Path(c.file_path).resolve()}'\nduration {c.duration_sec}\n"
+                for c in clips
+            )
+        )
+
+        # Scale filter: maintain aspect ratio then pad to target resolution with black bars.
+        # Avoids stretching when clip resolution (e.g. 512x512) differs from target (1920x1080).
+        w, h = resolution[0], resolution[1]
+        scale_filter = (
+            f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
         )
 
         cmd = [
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0", "-i", str(concat_file),
             "-i", audio_path,
-            "-vf", f"scale={resolution[0]}:{resolution[1]}",
+            "-vf", scale_filter,
             "-c:v", "libx264", "-c:a", "aac",
             "-shortest",
             output_path,
         ]
-        subprocess.run(cmd, check=True, capture_output=True)
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.decode(errors="replace").strip()
+            logger.error("FFmpeg assembly failed (exit %d):\n%s", exc.returncode, stderr)
+            raise RuntimeError(f"FFmpeg assembly failed (exit {exc.returncode}): {stderr[-500:]}") from exc
+
         logger.info("Assembled %d clips → %s", len(clips), output_path)
         return output_path

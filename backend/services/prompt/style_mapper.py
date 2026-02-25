@@ -222,6 +222,7 @@ class StyleMapper:
                 recommended_model=cfg.get("recommended_backend", "animatediff"),
                 cfg_scale=float(cfg.get("guidance_scale", 7.5)),
                 steps=int(cfg.get("steps", 20)),
+                base_checkpoint=cfg.get("base_checkpoint", "emilianJR/epiCRealism"),
             )
 
         return result

@@ -130,7 +130,17 @@ export function SongAnalysis({ analysis, onCreateVideo, onCreateMashup, onSectio
       try {
         const data = JSON.parse(ev.target?.result as string);
         if (data.name) setLayoutName(data.name);
-        if (Array.isArray(data.sections)) setRows(data.sections);
+        if (Array.isArray(data.sections)) {
+          const loadedRows: EditRow[] = data.sections;
+          const loadedSections = rowsToSections(loadedRows);
+          // Update all three states atomically so openEditor can't clobber the loaded rows
+          setRows(loadedRows);
+          setSections(loadedSections);
+          // Propagate to App immediately — user shouldn't need to click Apply after loading
+          onSectionsChange?.(loadedSections);
+          // Enter edit mode so the loaded sections are visible and can be verified
+          setEditMode(true);
+        }
       } catch { /* ignore bad files */ }
     };
     reader.readAsText(file);

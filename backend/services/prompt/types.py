@@ -41,6 +41,7 @@ class AnimationStyle:
     recommended_model: str     # "animatediff" | "wan26" | "sdxl_controlnet" | etc.
     cfg_scale: float           # 7.0 default
     steps: int                 # 20 default
+    base_checkpoint: str = "emilianJR/epiCRealism"  # HuggingFace model ID for base checkpoint
 
 
 @dataclass
@@ -50,6 +51,7 @@ class LoRAConfig:
     trigger_token: str
     weight: float              # 0.0-1.0
     lora_type: str             # "style" | "character" | "scene" | "identity"
+    file_path: str = ""        # Absolute path to .safetensors (set by generation worker)
 
 
 @dataclass
@@ -70,13 +72,14 @@ class ScenePrompt:
     duration_sec: float
     is_hero: bool
     energy_level: float
-    positive: str              # Full positive prompt
+    positive: str              # Distilled generation prompt (<60 words, no camera language)
     negative: str              # Full negative prompt
     style: str                 # Style name
     lora_names: List[str]      # Applied LoRAs
     transition_hint: str       # "cut" | "dissolve" | "fade" | "match_cut"
     cfg_scale: float
     steps: int
+    storyboard: str = ""       # Full cinematic description (human reference, not sent to diffusion model)
 
 
 @dataclass
@@ -88,3 +91,5 @@ class ComposedPrompt:
     steps: int
     model: str                 # Which backend to use
     nsfw: bool
+    base_checkpoint: str = "emilianJR/epiCRealism"  # HuggingFace base model ID
+    lora_configs: List[LoRAConfig] = field(default_factory=list)

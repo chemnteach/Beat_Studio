@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.services.video.beat_sync import BeatSynchronizer
@@ -90,6 +91,7 @@ def _load_analysis_for_sync(audio_id: str) -> SimpleNamespace:
         duration=data.get("duration_sec", 0.0),
         bpm=data.get("bpm", 120.0),
         sections=sections,
+        beat_times=data.get("beat_times", []),
     )
 
 
@@ -165,15 +167,20 @@ def _run_generate_video(
     style: str,
     quality: str,
     resolution: Tuple[int, int],
+    creative_direction: str = "",
+    scene_indices: Optional[List[int]] = None,
+    user_overrides: Optional[Dict[str, str]] = None,
+    lora_names: Optional[List[str]] = None,
 ) -> None:
     """Background worker: full video generation pipeline."""
     tm = _get_task_manager()
     try:
         from backend.services.audio.types import SceneTiming
+        from backend.services.lora.registry import LoRARegistry
         from backend.services.prompt.narrative_analyzer import NarrativeAnalyzer
         from backend.services.prompt.scene_generator import ScenePromptGenerator
         from backend.services.prompt.style_mapper import StyleMapper
-        from backend.services.prompt.types import ComposedPrompt
+        from backend.services.prompt.types import ComposedPrompt, LoRAConfig
         from backend.services.video.assembler import VideoAssembler
         from backend.services.video.encoder import VideoEncoder
         from backend.services.video.transition_engine import TransitionEngine
@@ -185,7 +192,13 @@ def _run_generate_video(
 
         # 2. Beat-aligned scene plan
         tm.update_progress(task_id, "planning_scenes", 10.0, "Creating scene plan…")
-        synced_scenes = _get_beat_sync().create_scene_plan(sync_ns, quality_tier=quality)
+        synced_scenes = _get_beat_sync().create_scene_plan(
+            sync_ns, quality_tier=quality, beat_times=sync_ns.beat_times or None,
+        )
+        if scene_indices:
+            idx_set = set(scene_indices)
+            synced_scenes = [s for s in synced_scenes if s.scene_index in idx_set]
+            logger.info("Test run: generating %d specific scene(s): %s", len(synced_scenes), sorted(idx_set))
 
         # 3. Select video generation backend
         try:
@@ -198,7 +211,9 @@ def _run_generate_video(
 
         # 4. Narrative analysis (LLM or heuristic fallback)
         tm.update_progress(task_id, "analyzing_narrative", 15.0, "Analyzing narrative arc…")
-        narrative = NarrativeAnalyzer().analyze(analysis, user_concept=style)
+        narrative = NarrativeAnalyzer().analyze(
+            analysis, user_concept=creative_direction or None,
+        )
 
         # 5. Animation style
         try:
@@ -227,13 +242,49 @@ def _run_generate_video(
             for s in synced_scenes
         ]
 
-        # 7. Generate per-scene prompts
+        # 7. Load available LoRAs from registry
+        lora_registry = LoRARegistry(
+            str(_BACKEND_DIR / "config" / "loras.yaml"),
+            base_path=str(_BACKEND_DIR.parent / "output" / "loras"),
+        )
+        requested_names: Optional[set] = set(lora_names) if lora_names else None
+        active_loras: List[LoRAConfig] = []
+        for e in lora_registry.list_all():
+            if e.status != "available":
+                continue
+            if requested_names is not None and e.name not in requested_names:
+                continue  # user didn't select this LoRA
+            abs_path = lora_registry._base / e.file_path  # noqa: SLF001
+            if not abs_path.exists():
+                logger.warning("LoRA '%s' registered but file missing: %s", e.name, abs_path)
+                continue
+            active_loras.append(LoRAConfig(
+                name=e.name,
+                trigger_token=e.trigger_token,
+                weight=e.weight,
+                lora_type=e.type,
+                file_path=str(abs_path),
+            ))
+        logger.info("Active LoRAs for generation (%d selected): %s",
+                    len(active_loras), [la.name for la in active_loras])
+
+        # 8. Generate per-scene prompts.
+        # user_overrides keys arrive as strings from the frontend; ScenePromptGenerator
+        # needs int keys so user text is used as base_desc (style prefix is still prepended).
         tm.update_progress(task_id, "generating_prompts", 20.0, "Building scene prompts…")
+        int_overrides: Dict[int, str] = {
+            int(k): v for k, v in (user_overrides or {}).items()
+            if k.isdigit() and v.strip()
+        }
+        if int_overrides:
+            logger.info("Applying %d user-reviewed prompt(s) via ScenePromptGenerator", len(int_overrides))
         scene_prompts = ScenePromptGenerator().generate_prompts(
-            narrative, scene_timings, animation_style, loras=[], user_overrides={},
+            narrative, scene_timings, animation_style,
+            loras=active_loras, user_overrides=int_overrides,
         )
 
-        # 8. Wrap as ComposedPrompts for the backend API
+        # 9. Wrap as ComposedPrompts for the backend API — carry LoRA configs per scene
+        lora_by_name: Dict[str, LoRAConfig] = {la.name: la for la in active_loras}
         composed = [
             ComposedPrompt(
                 positive=sp.positive,
@@ -242,6 +293,8 @@ def _run_generate_video(
                 steps=sp.steps,
                 model=backend.name(),
                 nsfw=False,
+                base_checkpoint=animation_style.base_checkpoint,
+                lora_configs=[lora_by_name[n] for n in sp.lora_names if n in lora_by_name],
             )
             for sp in scene_prompts
         ]
@@ -325,6 +378,10 @@ class GenerateRequest(BaseModel):
     style: str = "cinematic"
     quality: str = "professional"
     resolution: List[int] = [1920, 1080]
+    creative_direction: str = ""
+    scene_indices: Optional[List[int]] = None  # If set, generate only these scene indices (test run)
+    user_overrides: Dict[str, str] = {}  # scene_index (as string) → reviewed positive prompt
+    lora_names: List[str] = []           # LoRA names to activate; empty = no LoRAs loaded
 
 
 class SceneEditRequest(BaseModel):
@@ -370,9 +427,26 @@ async def generate_prompts(request: PromptsRequest) -> Dict[str, Any]:
             for s in request.sections
         ]
 
-    # Scene timings from beat sync (one timing per section for the prompt stage)
-    sync_ns = _load_analysis_for_sync(request.audio_id)
-    beat_scenes = _get_beat_sync().create_scene_plan(sync_ns, quality_tier=request.quality)
+    # Build sync namespace from the (possibly user-overridden) analysis sections
+    # so BeatSynchronizer respects the user's 8-section breakdown, not the cached 5-section auto-detect.
+    sync_ns = SimpleNamespace(
+        duration=analysis.duration_sec,
+        bpm=analysis.bpm,
+        sections=[
+            SimpleNamespace(
+                start=s.start_sec,
+                end=s.end_sec,
+                section_type=s.section_type,
+                energy_level=s.energy_level,
+            )
+            for s in analysis.sections
+        ],
+    )
+    beat_scenes = _get_beat_sync().create_scene_plan(
+        sync_ns,
+        quality_tier=request.quality,
+        beat_times=analysis.beat_times,
+    )
 
     scene_timings = [
         SceneTiming(
@@ -402,6 +476,24 @@ async def generate_prompts(request: PromptsRequest) -> Dict[str, Any]:
         narrative, scene_timings, animation_style, loras=[], user_overrides={},
     )
 
+    # Distill storyboards → short (<60 word) generation prompts, one unique prompt per clip
+    from backend.services.prompt.distiller import PromptDistiller
+    scene_prompts = PromptDistiller().distill(scene_prompts, animation_style.prefix)
+
+    # Mark first clip after bridge as hero (boat deck / first romantic moment)
+    prev_was_bridge = False
+    for sp, st in zip(scene_prompts, scene_timings):
+        if st.section_type == "bridge":
+            prev_was_bridge = True
+        elif prev_was_bridge:
+            sp.is_hero = True
+            prev_was_bridge = False
+            break
+
+    # Mark final clip as hero (resolution / last shot of the song)
+    if scene_prompts:
+        scene_prompts[-1].is_hero = True
+
     return {
         "overall_concept": narrative.overall_concept,
         "color_palette":   narrative.color_palette,
@@ -414,6 +506,7 @@ async def generate_prompts(request: PromptsRequest) -> Dict[str, Any]:
                 "end_sec":       sp.end_sec,
                 "duration_sec":  sp.duration_sec,
                 "is_hero":       sp.is_hero,
+                "storyboard":    sp.storyboard,
                 "positive":      sp.positive,
                 "negative":      sp.negative,
                 "transition":    sp.transition_hint,
@@ -520,6 +613,10 @@ async def generate_video(
     })
     background_tasks.add_task(
         _run_generate_video, task_id, request.audio_id, style, quality, resolution,
+        getattr(request, "creative_direction", ""),
+        request.scene_indices or None,
+        request.user_overrides or {},
+        request.lora_names or None,
     )
     return {"task_id": task_id, "status": "queued", "plan_id": request.plan_id}
 
@@ -561,12 +658,74 @@ async def list_styles() -> Dict[str, Any]:
 
 @router.get("/backends")
 async def list_backends() -> Dict[str, Any]:
-    """List available video generation backends."""
-    available = _get_model_router().list_available_backends()
-    return {"backends": available}
+    """List all video generation backends with availability and metadata."""
+    router = _get_model_router()
+    backends = []
+    for b in router._discover_backends():
+        try:
+            available = b.is_available()
+        except Exception:
+            available = False
+        try:
+            vram = b.vram_required_gb()
+        except Exception:
+            vram = 0.0
+        try:
+            cost = b.estimated_cost_per_scene()
+        except Exception:
+            cost = 0.0
+        backends.append({
+            "name":          b.name(),
+            "available":     available,
+            "is_local":      vram > 0,
+            "vram_required_gb": vram,
+            "cost_per_scene": cost,
+        })
+    return {"backends": backends}
+
+
+@router.get("/frames")
+async def list_clip_frames(video_id: Optional[str] = None):
+    """List extracted first-frame PNGs.
+
+    If video_id is given, return only frames for the clips in that run's concat.txt.
+    Otherwise return all frames.
+    """
+    import re
+    frames_dir = _BACKEND_DIR.parent / "output" / "video" / "clips" / "frames"
+    if not frames_dir.exists():
+        return {"frames": []}
+
+    if video_id:
+        concat = _BACKEND_DIR.parent / "output" / "video" / video_id / "concat.txt"
+        if concat.exists():
+            clip_ids = re.findall(r"clip_([0-9a-f]+)\.mp4", concat.read_text())
+            names = [f"clip_{cid}_frame0.png" for cid in clip_ids]
+            # Return only frames that actually exist (may not be extracted yet)
+            return {"frames": [n for n in names if (frames_dir / n).exists()]}
+
+    files = sorted(frames_dir.glob("*.png"))
+    return {"frames": [f.name for f in files]}
+
+
+@router.get("/frames/{filename}")
+async def serve_clip_frame(filename: str):
+    """Serve a single extracted frame PNG."""
+    frames_dir = _BACKEND_DIR.parent / "output" / "video" / "clips" / "frames"
+    path = frames_dir / filename
+    if not path.exists() or path.suffix.lower() != ".png":
+        raise HTTPException(status_code=404, detail=f"Frame {filename} not found")
+    return FileResponse(str(path), media_type="image/png")
 
 
 @router.get("/download/{video_id}")
-async def download_video(video_id: str) -> Dict[str, str]:
+async def download_video(video_id: str, platform: str = "youtube"):
     """Download a generated video by ID."""
-    return {"video_id": video_id, "status": "stub", "url": ""}
+    final = _BACKEND_DIR.parent / "output" / "video" / video_id / "final.mp4"
+    if not final.exists():
+        raise HTTPException(status_code=404, detail=f"Video {video_id} not found")
+    return FileResponse(
+        str(final),
+        media_type="video/mp4",
+        filename=f"video_{video_id}_{platform}.mp4",
+    )

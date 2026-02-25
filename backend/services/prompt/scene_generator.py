@@ -64,11 +64,8 @@ class ScenePromptGenerator:
             if style.prefix:
                 parts.append(style.prefix.rstrip(", "))
             parts.append(base_desc)
-            if narrative_sec:
-                if narrative_sec.key_lyric:
-                    parts.append(f'"{narrative_sec.key_lyric}"')
-                if narrative_sec.themes:
-                    parts.append(", ".join(narrative_sec.themes))
+            if narrative_sec and narrative_sec.themes:
+                parts.append(", ".join(narrative_sec.themes))
             parts.append(_QUALITY_TOKENS)
 
             positive = ", ".join(p.strip(", ") for p in parts if p.strip())
@@ -105,6 +102,7 @@ class ScenePromptGenerator:
                 transition_hint=transition,
                 cfg_scale=style.cfg_scale,
                 steps=steps,
+                storyboard=base_desc,
             ))
 
         return prompts

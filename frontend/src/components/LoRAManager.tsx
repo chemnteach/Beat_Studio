@@ -10,15 +10,25 @@ interface Props {
   audioId?: string;
   style?: string;
   embedded?: boolean;
+  selectedNames?: string[];
+  onSelectionChange?: (names: string[]) => void;
 }
 
-export function LoRAManager({ audioId, style, embedded = false }: Props) {
+export function LoRAManager({ audioId, style, embedded = false, selectedNames = [], onSelectionChange }: Props) {
   const [loras, setLoras] = useState<LoRAEntry[]>([]);
   const [searchResults, setSearchResults] = useState<LoRASearchResult[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
+
+  const toggleLora = (name: string) => {
+    if (!onSelectionChange) return;
+    const next = selectedNames.includes(name)
+      ? selectedNames.filter(n => n !== name)
+      : [...selectedNames, name];
+    onSelectionChange(next);
+  };
 
   useEffect(() => {
     void loadLoras();
@@ -90,23 +100,49 @@ export function LoRAManager({ audioId, style, embedded = false }: Props) {
       {/* Installed LoRAs */}
       <div className="lora-list" data-testid="lora-list">
         {loading && <p>Loading…</p>}
-        {loras.map(lora => (
-          <div key={lora.name} className={`lora-card status-${lora.status}`} data-testid={`lora-${lora.name}`}>
-            <div className="lora-info">
-              <strong>{lora.name}</strong>
-              <span className="lora-type">{lora.type}</span>
-              <code className="trigger">{lora.trigger_token}</code>
-              <span className={`status ${lora.status}`}>{lora.status}</span>
-            </div>
-            <button
-              onClick={() => void deleteLora(lora.name)}
-              className="delete-btn"
-              data-testid={`delete-lora-${lora.name}`}
-            >
-              Remove
-            </button>
+        {onSelectionChange && loras.length > 0 && (
+          <div style={{ fontSize: '0.75rem', color: '#888', marginBottom: '8px' }}>
+            {selectedNames.length === 0
+              ? 'No LoRAs selected — none will be loaded during generation'
+              : `${selectedNames.length} LoRA(s) selected for generation`}
           </div>
-        ))}
+        )}
+        {loras.map(lora => {
+          const isSelected = selectedNames.includes(lora.name);
+          return (
+            <div
+              key={lora.name}
+              className={`lora-card status-${lora.status}`}
+              data-testid={`lora-${lora.name}`}
+              style={onSelectionChange ? { border: `1px solid ${isSelected ? '#e94560' : '#0f3460'}`, cursor: 'pointer' } : undefined}
+              onClick={onSelectionChange ? () => toggleLora(lora.name) : undefined}
+            >
+              {onSelectionChange && (
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggleLora(lora.name)}
+                  onClick={e => e.stopPropagation()}
+                  style={{ marginRight: '10px', accentColor: '#e94560' }}
+                  data-testid={`select-lora-${lora.name}`}
+                />
+              )}
+              <div className="lora-info" style={{ flex: 1 }}>
+                <strong>{lora.name}</strong>
+                <span className="lora-type">{lora.type}</span>
+                <code className="trigger">{lora.trigger_token}</code>
+                <span className={`status ${lora.status}`}>{lora.status}</span>
+              </div>
+              <button
+                onClick={e => { e.stopPropagation(); void deleteLora(lora.name); }}
+                className="delete-btn"
+                data-testid={`delete-lora-${lora.name}`}
+              >
+                Remove
+              </button>
+            </div>
+          );
+        })}
         {loras.length === 0 && !loading && <p>No LoRAs installed.</p>}
       </div>
 

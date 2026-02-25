@@ -7,7 +7,7 @@ import type { AnimationStyle } from '../types';
 
 interface Props {
   selected: string;
-  onSelect: (style: string) => void;
+  onSelect: (style: string, recommendedBackend?: string) => void;
   recommendedStyles?: string[];
 }
 
@@ -70,7 +70,7 @@ export function StyleSelector({ selected, onSelect, recommendedStyles = [] }: Pr
               selected === style.name ? 'selected' : '',
               recommendedStyles.includes(style.name) ? 'recommended' : '',
             ].join(' ')}
-            onClick={() => onSelect(style.name)}
+            onClick={() => onSelect(style.name, style.recommended_backend)}
             data-testid={`style-${style.name}`}
           >
             {recommendedStyles.includes(style.name) && (

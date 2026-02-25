@@ -1,0 +1,108 @@
+---
+session: Beat_Studio
+date: 2026-02-25
+status: partial
+outcome: PARTIAL_PLUS
+---
+
+goal: Fix video generation pipeline — style prefix, beat_times, LoRA loading, download endpoint
+
+now: Run 4-scene test (rob_char + beach_sunset LoRAs selected) — verify watercolor style and rob_char appear
+
+test: python -m pytest backend/tests/unit/ -q
+
+done_this_session:
+  - task: Fix video download returning JSON — replace stub with real FileResponse, fix videoId extraction from task result
+    files:
+      - backend/routers/video.py
+      - frontend/src/components/VideoStudio.tsx
+      - frontend/src/components/VideoPreview.tsx
+
+  - task: Extract first frames from all clips as PNGs; add /api/video/frames endpoint with per-run filtering
+    files:
+      - backend/routers/video.py
+      - frontend/src/components/ClipFrameViewer.tsx
+      - frontend/src/components/VideoPreview.tsx
+
+  - task: Diagnose 4 root causes from test run — style prefix stripped, beat_times mismatch, all LoRAs loaded, 12 clips shown
+    files:
+      - docs/diagnostics/run_cb217758/scene01_boarding_pass.png
+      - docs/diagnostics/run_cb217758/scene02_watercolor_girl.png
+      - docs/diagnostics/run_cb217758/scene03_beach_man.png
+      - docs/diagnostics/run_cb217758/scene04_tiki_drink.png
+
+  - task: Fix style prefix stripped — route user_overrides through ScenePromptGenerator (int keys) so style prefix is preserved
+    files:
+      - backend/routers/video.py
+
+  - task: Fix beat_times mismatch — add beat_times to _load_analysis_for_sync namespace, pass to create_scene_plan in worker
+    files:
+      - backend/routers/video.py
+
+  - task: Wire LoRA loading into AnimateDiff pipeline — load_lora_weights per clip, unload in finally block
+    files:
+      - backend/services/prompt/types.py
+      - backend/services/video/backends/animatediff.py
+      - backend/routers/video.py
+
+  - task: Add LoRA selection UI — checkboxes in LoRAManager, lora_names in GenerateRequest, filter in worker
+    files:
+      - frontend/src/components/LoRAManager.tsx
+      - frontend/src/components/VideoStudio.tsx
+      - backend/routers/video.py
+
+  - task: Fix LoRA stage bypass — prompts "Continue" button now goes to lora stage instead of directly to plan
+    files:
+      - frontend/src/components/VideoStudio.tsx
+
+blockers: []
+
+questions:
+  - Did the beat_times fix actually align scene indices between prompts stage and generation worker?
+  - Does DreamShaper-8 download cleanly from HF on the system, or does it need pre-caching?
+  - The cb217758 run had image 2 (watercolor girl) working but images 1/3 were photorealistic — why inconsistent?
+
+decisions:
+  - lora_names_default_empty: lora_names=[] means no LoRAs loaded; user must explicitly select. Avoids all-trigger chaos.
+  - lora_unload_finally: Always unload LoRA weights in try/finally so they never bleed between clips
+  - user_overrides_via_scene_generator: Pass as int_overrides to ScenePromptGenerator so style prefix wraps user text
+  - beat_times_in_namespace: Added to _load_analysis_for_sync so generation worker matches prompts endpoint behavior
+  - file_path_in_lora_config: Added file_path field to LoRAConfig so AnimateDiff backend uses exact registry path, not fuzzy match
+
+findings:
+  - boarding_pass_wrong_subject: scene01 showed a boarding pass — confirmed user_overrides weren't reaching generation before fix
+  - watercolor_inconsistent: scene02 had watercolor (DreamShaper loading), scene03 was photorealistic — checkpoint swap not firing consistently for all clips
+  - tiki_bar_environment: scene04 showed correct tiki bar environment without scene LoRA loaded — base model has good tiki bar priors
+  - 12_clips_was_accumulation: Frame viewer showed all past runs; fixed by scoping to video_id via concat.txt
+
+worked:
+  - Scoping frame viewer to video_id via concat.txt — clean per-run diagnostics
+  - Routing user_overrides through ScenePromptGenerator int_overrides — correct place to insert user text
+  - LoRAConfig.file_path populated from registry — deterministic, no fuzzy filename matching
+
+failed:
+  - Fuzzy filename matching for LoRA paths (crossfadeclub resolved to adapter_model.safetensors not the real file)
+  - Post-hoc sp.positive = user_overrides[key] — stripped style prefix
+
+next:
+  - Run 4-scene test with rob_char + beach_sunset selected in LoRA stage
+  - Check server logs for "Loaded LoRA rob-character" and "Using ByteDance AnimateDiff-Lightning adapter"
+  - Verify checkpoint swap fires for all 4 clips (look for "Loading AnimateDiff pipeline: checkpoint='Lykon/dreamshaper-8'")
+  - If watercolor inconsistency persists, investigate _current_checkpoint caching across clips
+  - Consider per-scene LoRA selection (different LoRAs for character vs environment scenes)
+  - Wire SceneEditor prompt edits back through user_overrides (currently only prompts-stage edits are wired)
+
+files:
+  created:
+    - frontend/src/components/ClipFrameViewer.tsx
+    - docs/diagnostics/run_cb217758/scene01_boarding_pass.png
+    - docs/diagnostics/run_cb217758/scene02_watercolor_girl.png
+    - docs/diagnostics/run_cb217758/scene03_beach_man.png
+    - docs/diagnostics/run_cb217758/scene04_tiki_drink.png
+  modified:
+    - backend/routers/video.py
+    - backend/services/prompt/types.py
+    - backend/services/video/backends/animatediff.py
+    - frontend/src/components/VideoStudio.tsx
+    - frontend/src/components/VideoPreview.tsx
+    - frontend/src/components/LoRAManager.tsx

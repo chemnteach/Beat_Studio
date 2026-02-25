@@ -362,3 +362,166 @@ class TestStyleMapper:
             assert style.prefix != ""
             assert style.negative_prefix != ""
             assert style.recommended_model != ""
+
+
+# ── ScenePromptGenerator — storyboard field ───────────────────────────────────
+
+class TestScenePromptGeneratorStoryboard:
+    def test_storyboard_field_populated(self):
+        from backend.services.prompt.scene_generator import ScenePromptGenerator
+        gen = ScenePromptGenerator()
+        narrative = _make_narrative_arc()
+        scenes = [_make_scene_timing(0, 0, 30)]
+        style = _make_style()
+        prompts = gen.generate_prompts(narrative, scenes, style)
+        assert prompts[0].storyboard != ""
+
+    def test_storyboard_matches_visual_description(self):
+        from backend.services.prompt.scene_generator import ScenePromptGenerator
+        gen = ScenePromptGenerator()
+        narrative = _make_narrative_arc()
+        scenes = [_make_scene_timing(0, 0, 30)]
+        style = _make_style()
+        prompts = gen.generate_prompts(narrative, scenes, style)
+        assert prompts[0].storyboard == narrative.sections[0].visual_description
+
+    def test_storyboard_uses_user_override_text(self):
+        from backend.services.prompt.scene_generator import ScenePromptGenerator
+        gen = ScenePromptGenerator()
+        narrative = _make_narrative_arc()
+        scenes = [_make_scene_timing(0, 0, 30)]
+        style = _make_style()
+        overrides = {0: "Explicit override text for testing"}
+        prompts = gen.generate_prompts(narrative, scenes, style, user_overrides=overrides)
+        assert prompts[0].storyboard == "Explicit override text for testing"
+
+
+# ── PromptDistiller ───────────────────────────────────────────────────────────
+
+def _make_scene_prompt(idx=0, storyboard="A woman dancing alone in golden light. Camera pans slowly."):
+    return ScenePrompt(
+        scene_index=idx,
+        start_sec=idx * 30.0,
+        end_sec=(idx + 1) * 30.0,
+        duration_sec=30.0,
+        is_hero=False,
+        energy_level=0.5,
+        positive="cinematic film still, A woman dancing alone in golden light, high quality",
+        negative="low quality, blurry",
+        style="cinematic",
+        lora_names=[],
+        transition_hint="cut",
+        cfg_scale=7.0,
+        steps=20,
+        storyboard=storyboard,
+    )
+
+
+class TestPromptDistiller:
+    def test_distill_replaces_positive(self):
+        from backend.services.prompt.distiller import PromptDistiller
+        d = PromptDistiller()
+        prompt = _make_scene_prompt()
+        original_positive = prompt.positive
+
+        with patch.object(d, "_call_llm", return_value={
+            "sections": [{"section_index": 0, "clips": [{"clip_index": 0, "prompt": "watercolor, woman dancing, golden light, high quality"}]}]
+        }):
+            result = d.distill([prompt], style_prefix="watercolor, ")
+
+        assert result[0].positive == "watercolor, woman dancing, golden light, high quality"
+        assert result[0].positive != original_positive
+
+    def test_distill_preserves_storyboard(self):
+        from backend.services.prompt.distiller import PromptDistiller
+        d = PromptDistiller()
+        original_storyboard = "A woman dancing alone in golden light. Camera pans slowly."
+        prompt = _make_scene_prompt(storyboard=original_storyboard)
+
+        with patch.object(d, "_call_llm", return_value={
+            "sections": [{"section_index": 0, "clips": [{"clip_index": 0, "prompt": "short prompt"}]}]
+        }):
+            result = d.distill([prompt])
+
+        assert result[0].storyboard == original_storyboard
+
+    def test_distill_unique_prompts_for_subdivided_section(self):
+        from backend.services.prompt.distiller import PromptDistiller
+        d = PromptDistiller()
+        shared_storyboard = "Rob stands at airport gate. He then walks to the beach."
+        clip_a = _make_scene_prompt(0, storyboard=shared_storyboard)
+        clip_b = _make_scene_prompt(1, storyboard=shared_storyboard)
+
+        with patch.object(d, "_call_llm", return_value={
+            "sections": [{
+                "section_index": 0,
+                "clips": [
+                    {"clip_index": 0, "prompt": "rob_char at airport gate, warm light"},
+                    {"clip_index": 1, "prompt": "rob_char walking on beach, sunset"},
+                ],
+            }]
+        }):
+            result = d.distill([clip_a, clip_b], style_prefix="watercolor, ")
+
+        assert result[0].positive != result[1].positive
+
+    def test_distill_fallback_when_llm_fails(self):
+        from backend.services.prompt.distiller import PromptDistiller
+        d = PromptDistiller()
+        prompt = _make_scene_prompt()
+        original_storyboard = prompt.storyboard
+
+        with patch.object(d, "_call_llm", side_effect=Exception("API down")):
+            result = d.distill([prompt], style_prefix="watercolor, ")
+
+        # Fallback should shorten the prompt and strip camera language
+        assert result[0].positive != ""
+        assert "camera pans" not in result[0].positive.lower()
+        assert result[0].storyboard == original_storyboard
+
+    def test_fallback_produces_different_prompts_for_subdivided_section(self):
+        from backend.services.prompt.distiller import PromptDistiller
+        d = PromptDistiller()
+        storyboard = "Wide shot of beach. Then a close shot of a woman. Pan to the sunset."
+        clip_a = _make_scene_prompt(0, storyboard=storyboard)
+        clip_b = _make_scene_prompt(1, storyboard=storyboard)
+        clip_c = _make_scene_prompt(2, storyboard=storyboard)
+
+        with patch.object(d, "_call_llm", side_effect=Exception("API down")):
+            result = d.distill([clip_a, clip_b, clip_c])
+
+        # At least two of the three clips should be different
+        positives = {p.positive for p in result}
+        assert len(positives) > 1
+
+    def test_distill_empty_list_returns_empty(self):
+        from backend.services.prompt.distiller import PromptDistiller
+        d = PromptDistiller()
+        assert d.distill([]) == []
+
+    def test_distill_applies_fallback_to_missed_clips(self):
+        """LLM response omits section_index 1 — that clip should get heuristic fallback."""
+        from backend.services.prompt.distiller import PromptDistiller
+        d = PromptDistiller()
+        # Use a storyboard with camera language so we can verify stripping
+        clip_a = _make_scene_prompt(0, storyboard="Wide shot of golden beach at sunrise.")
+        clip_b = _make_scene_prompt(1, storyboard="The camera pans to woman walking slowly. Dolly in on her face.")
+        original_b = clip_b.positive  # "cinematic film still, A woman dancing..."
+
+        with patch.object(d, "_call_llm", return_value={
+            "sections": [
+                # section_index 1 deliberately omitted — simulates truncated LLM response
+                {"section_index": 0, "clips": [{"clip_index": 0, "prompt": "distilled A prompt"}]},
+            ]
+        }):
+            result = d.distill([clip_a, clip_b], style_prefix="watercolor, ")
+
+        # clip_a was updated by LLM
+        assert result[0].positive == "distilled A prompt"
+        # clip_b was missed by LLM — fallback replaced the original positive
+        assert result[1].positive != original_b
+        # fallback must strip camera language from the storyboard
+        assert "camera pans" not in result[1].positive.lower()
+        assert "dolly" not in result[1].positive.lower()
+        # storyboard field must remain untouched
+        assert result[1].storyboard == "The camera pans to woman walking slowly. Dolly in on her face."

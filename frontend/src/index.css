@@ -169,6 +169,65 @@ button:hover:not(:disabled) { background: #c73652; }
 .progress-bar-wrap { background: #0f3460; border-radius: 6px; height: 8px; margin: 8px 0; }
 .progress-bar { background: #e94560; height: 8px; border-radius: 6px; transition: width 0.3s; }
 
+/* ── Style Selector ── */
+.style-selector { margin: 16px 0; }
+
+.category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.category-tabs button {
+  padding: 4px 14px;
+  font-size: 0.8rem;
+  background: #0f3460;
+  color: #aaa;
+  border-radius: 20px;
+  text-transform: capitalize;
+}
+.category-tabs button.active,
+.category-tabs button:hover { background: #e94560; color: #fff; }
+
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.style-card {
+  position: relative;
+  background: #16213e;
+  border: 2px solid #0f3460;
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.style-card:hover { border-color: #e94560; background: #1a2a4a; }
+.style-card.selected { border-color: #e94560; background: #2a1a2e; }
+.style-card h4 { font-size: 0.85rem; color: #e0e0e0; margin-bottom: 4px; }
+.style-card .best-for { font-size: 0.72rem; color: #888; margin-bottom: 2px; }
+.style-card .backend-hint { font-size: 0.68rem; color: #555; margin: 0; }
+.recommended-badge {
+  position: absolute;
+  top: 6px; right: 6px;
+  background: #e94560;
+  color: #fff;
+  font-size: 0.6rem;
+  padding: 2px 6px;
+  border-radius: 10px;
+  text-transform: uppercase;
+}
+
+/* ── Video Studio ── */
+.studio-header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.studio-header h2 { margin: 0; }
+.studio-header button { padding: 4px 12px; background: #0f3460; font-size: 0.8rem; }
+.stage-nav { display: flex; gap: 12px; margin-top: 20px; }
+.creative-direction label { display: block; margin-bottom: 6px; color: #aaa; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
+.creative-direction textarea { width: 100%; }
+
 /* ── Generic ── */
 h2, h3 { margin-bottom: 12px; }
 p { margin-bottom: 8px; line-height: 1.5; }

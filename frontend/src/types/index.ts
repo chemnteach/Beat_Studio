@@ -87,12 +87,17 @@ export interface AnimationStyle {
 
 export interface ScenePlan {
   scene_index: number;
-  backend_name: string;
-  estimated_time_sec: number;
-  estimated_cost_usd: number;
-  resolution: [number, number];
-  prompt?: string;
+  start_sec: number;
+  end_sec: number;
+  duration_sec: number;
+  is_hero: boolean;
   notes?: string;
+  // Optional fields present only if the backend has estimated per-scene costs
+  backend_name?: string;
+  estimated_time_sec?: number;
+  estimated_cost_usd?: number;
+  resolution?: [number, number];
+  prompt?: string;
 }
 
 export interface ExecutionPlan {

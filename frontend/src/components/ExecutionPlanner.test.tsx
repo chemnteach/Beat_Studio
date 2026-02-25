@@ -56,6 +56,6 @@ describe('ExecutionPlanner', () => {
     const onConfirm = vi.fn()
     render(<ExecutionPlanner plan={localPlan} onConfirm={onConfirm} />)
     fireEvent.click(screen.getByTestId('confirm-plan-btn'))
-    expect(onConfirm).toHaveBeenCalledWith('plan-001')
+    expect(onConfirm).toHaveBeenCalledWith('plan-001', undefined)  // no test mode = no indices
   })
 })

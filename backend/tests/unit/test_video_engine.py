@@ -120,7 +120,9 @@ class TestAnimateDiffBackend:
     def test_is_available_no_model(self, tmp_path):
         from backend.services.video.backends.animatediff import AnimateDiffBackend
         b = AnimateDiffBackend(model_path=str(tmp_path / "nonexistent.pt"))
-        assert not b.is_available()
+        # Simulate no HF cache hits for either known adapter
+        with patch("huggingface_hub.try_to_load_from_cache", return_value=None):
+            assert not b.is_available()
 
     def test_generate_clip_calls_internal(self):
         from backend.services.video.backends.animatediff import AnimateDiffBackend
@@ -138,12 +140,12 @@ class TestAnimateDiffBackend:
             clips = b.generate_batch(prompts, [4.0, 4.0], (576, 1024))
         assert len(clips) == 2
 
-    def test_kill_clears_pipeline(self):
+    def test_kill_clears_checkpoint(self):
         from backend.services.video.backends.animatediff import AnimateDiffBackend
         b = AnimateDiffBackend()
-        b._pipeline = MagicMock()
+        b._current_checkpoint = "Lykon/dreamshaper-8"
         b.kill()
-        assert b._pipeline is None
+        assert b._current_checkpoint == ""
 
 
 # ── WAN26 Local backend ───────────────────────────────────────────────────────
