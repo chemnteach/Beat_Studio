@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -149,7 +150,8 @@ def _download_youtube(url: str) -> Dict[str, Any]:
 
     ydl_opts = {
         "format": "bestaudio/best",
-        "outtmpl": str(Path(_CACHE_DIR) / "%(title)s.%(ext)s"),
+        # Use YouTube video ID (always URL-safe) to avoid filename sanitization mismatches
+        "outtmpl": str(Path(_CACHE_DIR) / "%(id)s.%(ext)s"),
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "wav",
@@ -163,14 +165,17 @@ def _download_youtube(url: str) -> Dict[str, Any]:
         info = ydl.extract_info(url, download=True)
 
     video_title = info.get("title", "Unknown")
+    video_id = info.get("id", "unknown")
     artist, title = extract_artist_title_from_youtube_title(video_title)
     song_id = _make_id(artist, title)
 
-    # yt-dlp writes the file as <title>.wav
-    expected = Path(_CACHE_DIR) / f"{video_title}.wav"
+    # yt-dlp wrote <video_id>.wav — rename to song_id-based name
+    downloaded = Path(_CACHE_DIR) / f"{video_id}.wav"
     final = Path(_CACHE_DIR) / f"{song_id}.wav"
-    if expected.exists():
-        expected.rename(final)
+    if not downloaded.exists():
+        raise DownloadError(f"Expected downloaded file not found: {downloaded}")
+    if downloaded != final:
+        downloaded.rename(final)
 
     return {
         "id": song_id,
@@ -182,11 +187,26 @@ def _download_youtube(url: str) -> Dict[str, Any]:
 
 
 def ingest_youtube_url(url: str, max_retries: int = 3) -> Dict[str, Any]:
-    """Download audio from YouTube URL and cache as WAV."""
-    try:
-        return _download_youtube(url)
-    except Exception as exc:
-        raise IngestionError(f"YouTube download failed for {url}: {exc}") from exc
+    """Download audio from YouTube URL and cache as WAV.
+
+    Retries up to max_retries times with exponential backoff (1s, 2s) on failure.
+    """
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return _download_youtube(url)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                wait = 2 ** (attempt - 1)  # 1s, 2s
+                logger.warning(
+                    "YouTube download attempt %d/%d failed: %s — retrying in %ds",
+                    attempt, max_retries, exc, wait,
+                )
+                time.sleep(wait)
+    raise IngestionError(
+        f"YouTube download failed for {url} after {max_retries} attempts: {last_exc}"
+    ) from last_exc
 
 
 # ── main entry point ──────────────────────────────────────────────────────────

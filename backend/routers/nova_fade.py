@@ -153,8 +153,8 @@ def _run_generate_canonical(
         if pipe is not None:
             try:
                 vm.kill()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("VRAM cleanup failed after canonical generation: %s", exc)
 
 
 def _run_train_lora(

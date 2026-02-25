@@ -147,7 +147,8 @@ def analyze_section_energy(
                 tempo_stability = float(np.exp(-np.var(beat_intervals) * 10))
             else:
                 tempo_stability = 0.0
-        except Exception:
+        except Exception as exc:
+            logger.debug("tempo_stability calculation failed: %s — using 0.5", exc)
             tempo_stability = 0.5
 
         return {

@@ -235,7 +235,8 @@ def _run_generate_video(
         # 5. Animation style
         try:
             animation_style = StyleMapper().get_style(style)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Unknown style %r (%s) — falling back to 'cinematic'", style, exc)
             animation_style = StyleMapper().get_style("cinematic")
 
         # 6. Convert SyncedScenePlan → SceneTiming (ScenePromptGenerator needs energy_level + section_type)
@@ -674,15 +675,18 @@ async def list_backends() -> Dict[str, Any]:
     for b in router._discover_backends():
         try:
             available = b.is_available()
-        except Exception:
+        except Exception as exc:
+            logger.debug("Backend %s.is_available() failed: %s", b.name(), exc)
             available = False
         try:
             vram = b.vram_required_gb()
-        except Exception:
+        except Exception as exc:
+            logger.debug("Backend %s.vram_required_gb() failed: %s", b.name(), exc)
             vram = 0.0
         try:
             cost = b.estimated_cost_per_scene()
-        except Exception:
+        except Exception as exc:
+            logger.debug("Backend %s.estimated_cost_per_scene() failed: %s", b.name(), exc)
             cost = 0.0
         backends.append({
             "name":          b.name(),
