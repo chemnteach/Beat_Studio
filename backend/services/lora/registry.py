@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -118,3 +119,27 @@ class LoRARegistry:
             "source": e.source,
             "source_url": e.source_url,
         }
+
+
+# ── module-level singleton (shared across all routers) ────────────────────────
+
+_registry_singleton: Optional[LoRARegistry] = None
+_registry_lock = threading.Lock()
+
+
+def get_registry(registry_path: str, base_path: str = "output/loras") -> LoRARegistry:
+    """Return the shared LoRARegistry singleton.
+
+    Thread-safe: double-checked locking.  On first call ``registry_path`` is
+    used to load from disk; subsequent calls return the cached instance.
+    """
+    global _registry_singleton
+    if _registry_singleton is not None:
+        return _registry_singleton
+    with _registry_lock:
+        if _registry_singleton is None:
+            _registry_singleton = LoRARegistry(
+                registry_path=registry_path,
+                base_path=base_path,
+            )
+    return _registry_singleton

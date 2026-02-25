@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from backend.services.lora.registry import LoRARegistry
+from backend.services.lora.registry import LoRARegistry, get_registry
 
 logger = logging.getLogger("beat_studio.routers.lora")
 router = APIRouter()
@@ -18,17 +18,8 @@ _BACKEND_DIR = Path(__file__).parent.parent
 _LORAS_YAML = _BACKEND_DIR / "config" / "loras.yaml"
 _LORAS_BASE = _BACKEND_DIR.parent / "output" / "loras"
 
-_registry: Optional[LoRARegistry] = None
-
-
 def _get_registry() -> LoRARegistry:
-    global _registry
-    if _registry is None:
-        _registry = LoRARegistry(
-            registry_path=str(_LORAS_YAML),
-            base_path=str(_LORAS_BASE),
-        )
-    return _registry
+    return get_registry(registry_path=str(_LORAS_YAML), base_path=str(_LORAS_BASE))
 
 
 class TrainRequest(BaseModel):

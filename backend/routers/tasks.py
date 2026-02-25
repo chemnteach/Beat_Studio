@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -16,6 +18,7 @@ router = APIRouter()
 # ── Paths / singletons ────────────────────────────────────────────────────────
 _BACKEND_DIR = Path(__file__).parent.parent
 _task_manager: Optional[TaskManager] = None
+_task_manager_lock = threading.Lock()
 
 _WS_POLL_INTERVAL = 0.5   # seconds between DB polls for WebSocket updates
 _WS_TIMEOUT       = 3600  # max WebSocket session duration (1 hour)
@@ -23,8 +26,11 @@ _WS_TIMEOUT       = 3600  # max WebSocket session duration (1 hour)
 
 def _get_task_manager() -> TaskManager:
     global _task_manager
-    if _task_manager is None:
-        _task_manager = TaskManager(db_path=str(_BACKEND_DIR / "tasks.db"))
+    if _task_manager is not None:
+        return _task_manager
+    with _task_manager_lock:
+        if _task_manager is None:
+            _task_manager = TaskManager(db_path=str(_BACKEND_DIR / "tasks.db"))
     return _task_manager
 
 
@@ -102,10 +108,10 @@ async def task_progress_ws(websocket: WebSocket, task_id: str) -> None:
     """
     await websocket.accept()
     tm = _get_task_manager()
-    elapsed = 0.0
+    deadline = time.monotonic() + _WS_TIMEOUT
 
     try:
-        while elapsed < _WS_TIMEOUT:
+        while time.monotonic() < deadline:
             state = tm.get_status(task_id)
 
             if state is None:
@@ -131,7 +137,6 @@ async def task_progress_ws(websocket: WebSocket, task_id: str) -> None:
                 break
 
             await asyncio.sleep(_WS_POLL_INTERVAL)
-            elapsed += _WS_POLL_INTERVAL
 
         await websocket.close()
 

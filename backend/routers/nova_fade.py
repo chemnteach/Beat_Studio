@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -9,7 +10,7 @@ import yaml
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from pydantic import BaseModel
 
-from backend.services.lora.registry import LoRARegistry
+from backend.services.lora.registry import LoRARegistry, get_registry
 from backend.services.lora.trainer import LoRATrainer
 from backend.services.lora.types import LoRAEntry, LoRATrainingConfig
 from backend.services.nova_fade.character import NovaFadeCharacter
@@ -31,19 +32,27 @@ _NOVA_STYLE_LORA = "crossfadeclub_style_v1"
 
 _task_manager: Optional[TaskManager] = None
 _vram_manager: Optional[VRAMManager] = None
+_task_manager_lock = threading.Lock()
+_vram_manager_lock = threading.Lock()
 
 
 def _get_task_manager() -> TaskManager:
     global _task_manager
-    if _task_manager is None:
-        _task_manager = TaskManager(db_path=str(_BACKEND_DIR / "tasks.db"))
+    if _task_manager is not None:
+        return _task_manager
+    with _task_manager_lock:
+        if _task_manager is None:
+            _task_manager = TaskManager(db_path=str(_BACKEND_DIR / "tasks.db"))
     return _task_manager
 
 
 def _get_vram_manager() -> VRAMManager:
     global _vram_manager
-    if _vram_manager is None:
-        _vram_manager = VRAMManager(budget_gb=12.0)
+    if _vram_manager is not None:
+        return _vram_manager
+    with _vram_manager_lock:
+        if _vram_manager is None:
+            _vram_manager = VRAMManager(budget_gb=12.0)
     return _vram_manager
 
 
@@ -163,7 +172,7 @@ def _run_train_lora(
         result = LoRATrainer().train(config)
 
         if result.success:
-            registry = LoRARegistry(
+            registry = get_registry(
                 registry_path=str(_LORAS_YAML),
                 base_path=str(_LORA_BASE),
             )

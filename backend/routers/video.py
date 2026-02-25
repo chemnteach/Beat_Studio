@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,33 +30,49 @@ _beat_sync: Optional[BeatSynchronizer] = None
 _model_router: Optional[ModelRouter] = None
 _cost_estimator: Optional[CostEstimator] = None
 _task_manager: Optional[TaskManager] = None
+_beat_sync_lock = threading.Lock()
+_model_router_lock = threading.Lock()
+_cost_estimator_lock = threading.Lock()
+_task_manager_lock = threading.Lock()
 
 
 def _get_beat_sync() -> BeatSynchronizer:
     global _beat_sync
-    if _beat_sync is None:
-        _beat_sync = BeatSynchronizer()
+    if _beat_sync is not None:
+        return _beat_sync
+    with _beat_sync_lock:
+        if _beat_sync is None:
+            _beat_sync = BeatSynchronizer()
     return _beat_sync
 
 
 def _get_model_router() -> ModelRouter:
     global _model_router
-    if _model_router is None:
-        _model_router = ModelRouter()
+    if _model_router is not None:
+        return _model_router
+    with _model_router_lock:
+        if _model_router is None:
+            _model_router = ModelRouter()
     return _model_router
 
 
 def _get_cost_estimator() -> CostEstimator:
     global _cost_estimator
-    if _cost_estimator is None:
-        _cost_estimator = CostEstimator()
+    if _cost_estimator is not None:
+        return _cost_estimator
+    with _cost_estimator_lock:
+        if _cost_estimator is None:
+            _cost_estimator = CostEstimator()
     return _cost_estimator
 
 
 def _get_task_manager() -> TaskManager:
     global _task_manager
-    if _task_manager is None:
-        _task_manager = TaskManager(db_path=str(_BACKEND_DIR / "tasks.db"))
+    if _task_manager is not None:
+        return _task_manager
+    with _task_manager_lock:
+        if _task_manager is None:
+            _task_manager = TaskManager(db_path=str(_BACKEND_DIR / "tasks.db"))
     return _task_manager
 
 

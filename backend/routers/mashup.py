@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -44,21 +45,29 @@ _ALLOWED_URL_HOSTS = {
 # ── Module-level singletons (lazy init) ───────────────────────────────────────
 _task_manager: Optional[TaskManager] = None
 _library: Optional[MashupLibrary] = None
+_task_manager_lock = threading.Lock()
+_library_lock = threading.Lock()
 
 
 def _get_task_manager() -> TaskManager:
     global _task_manager
-    if _task_manager is None:
-        _task_manager = TaskManager(db_path=str(_BACKEND_DIR / "tasks.db"))
+    if _task_manager is not None:
+        return _task_manager
+    with _task_manager_lock:
+        if _task_manager is None:
+            _task_manager = TaskManager(db_path=str(_BACKEND_DIR / "tasks.db"))
     return _task_manager
 
 
 def _get_library() -> MashupLibrary:
     global _library
-    if _library is None:
-        _library = MashupLibrary(
-            persist_directory=str(_BACKEND_DIR / "data" / "library_cache" / "chroma")
-        )
+    if _library is not None:
+        return _library
+    with _library_lock:
+        if _library is None:
+            _library = MashupLibrary(
+                persist_directory=str(_BACKEND_DIR / "data" / "library_cache" / "chroma")
+            )
     return _library
 
 
