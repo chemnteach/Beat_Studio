@@ -220,6 +220,41 @@ button:hover:not(:disabled) { background: #c73652; }
   text-transform: uppercase;
 }
 
+/* ── LoRA Manager ── */
+.type-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.lora-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.lora-card.status-missing { opacity: 0.6; }
+.lora-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1; }
+.lora-info strong { color: #e0e0e0; }
+.lora-type {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px;
+  background: #0f3460; padding: 2px 8px; border-radius: 10px; color: #aaa;
+}
+.lora-info .trigger {
+  font-size: 0.75rem; color: #888; background: #0a0a1a;
+  padding: 2px 8px; border-radius: 4px;
+}
+.lora-info .status { font-size: 0.75rem; }
+.lora-info .status.available { color: #2ecc71; }
+.lora-info .status.missing   { color: #e74c3c; }
+.lora-info .status.downloading { color: #f39c12; }
+.delete-btn { font-size: 0.75rem; background: #2a0a0a; border-color: #5a1a1a; padding: 4px 10px; }
+.delete-btn:hover { background: #c0392b; border-color: #c0392b; }
+.search-result {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: #16213e; border: 1px solid #0f3460; border-radius: 6px; margin-bottom: 6px;
+}
+.search-result strong { flex: 1; }
+
 /* ── Video Studio ── */
 .studio-header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
 .studio-header h2 { margin: 0; }

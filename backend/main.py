@@ -8,7 +8,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import audio, lora, mashup, nova_fade, system, tasks, video
+from backend.routers import audio, lora, mashup, nova_fade, storyboard, system, tasks, video
 
 app = FastAPI(
     title="Beat Studio",
@@ -32,5 +32,6 @@ app.include_router(mashup.router,     prefix="/api/mashup",     tags=["Mashup"])
 app.include_router(video.router,      prefix="/api/video",      tags=["Video"])
 app.include_router(lora.router,       prefix="/api/lora",       tags=["LoRA"])
 app.include_router(nova_fade.router,  prefix="/api/nova-fade",  tags=["Nova Fade"])
+app.include_router(storyboard.router, prefix="/api/video/storyboard", tags=["Storyboard"])
 app.include_router(tasks.router,      prefix="/api/tasks",      tags=["Tasks"])
 app.include_router(system.router,     prefix="/api/system",     tags=["System"])

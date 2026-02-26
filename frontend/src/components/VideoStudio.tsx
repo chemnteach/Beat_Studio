@@ -1,6 +1,6 @@
 /**
  * VideoStudio — the main video creation workspace.
- * Stage flow: style → prompts → lora → plan → scenes → generating → preview
+ * Stage flow: style → prompts → lora → storyboard → plan → scenes → generating → preview
  */
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
@@ -10,9 +10,10 @@ import { ExecutionPlanner } from './ExecutionPlanner';
 import { SceneEditor } from './SceneEditor';
 import { ProgressTracker } from './ProgressTracker';
 import { VideoPreview } from './VideoPreview';
+import { StoryboardPreview } from './StoryboardPreview';
 import type { ExecutionPlan, ScenePlan, SectionInfo, SongAnalysis } from '../types';
 
-type Stage = 'style' | 'prompts' | 'lora' | 'plan' | 'scenes' | 'generating' | 'preview';
+type Stage = 'style' | 'prompts' | 'lora' | 'storyboard' | 'plan' | 'scenes' | 'generating' | 'preview';
 
 interface ScenePrompt {
   scene_index: number;
@@ -84,6 +85,7 @@ export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
   const [uploadNotice, setUploadNotice] = useState('');
   const [sceneIndices, setSceneIndices] = useState<number[] | undefined>(undefined);
   const [selectedLoraNames, setSelectedLoraNames] = useState<string[]>([]);
+  const [storyboardId, setStoryboardId] = useState<string | null>(null);
 
   const songTitle = analysis?.title;
 
@@ -422,7 +424,22 @@ export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
             {uploadNotice && (
               <span style={{ fontSize: '0.8rem', color: '#2ecc71' }}>{uploadNotice}</span>
             )}
-            <button onClick={() => setStage('lora')} data-testid="next-to-lora-btn" style={{ marginLeft: 'auto' }}>
+            <button
+              onClick={async () => {
+                // Auto-select LoRAs whose trigger token appears in any scene prompt
+                try {
+                  const { data } = await axios.get<{ loras: { name: string; trigger_token: string }[] }>('/api/lora/list');
+                  const allPromptText = editedPrompts.map(p => p.positive).join(' ').toLowerCase();
+                  const autoSelected = data.loras
+                    .filter(l => l.trigger_token && allPromptText.includes(l.trigger_token.toLowerCase()))
+                    .map(l => l.name);
+                  if (autoSelected.length > 0) setSelectedLoraNames(autoSelected);
+                } catch { /* non-fatal — proceed without pre-selection */ }
+                setStage('lora');
+              }}
+              data-testid="next-to-lora-btn"
+              style={{ marginLeft: 'auto' }}
+            >
               Continue to LoRA Setup →
             </button>
           </div>
@@ -441,10 +458,30 @@ export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
           />
           <div className="stage-nav">
             <button onClick={() => setStage('prompts')} data-testid="back-to-prompts-btn">← Prompts</button>
-            <button onClick={() => void fetchPlan()} disabled={loading} data-testid="next-to-plan-btn">
-              {loading ? 'Planning…' : 'Next: Execution Plan →'}
+            <button onClick={() => setStage('storyboard')} data-testid="next-to-storyboard-btn">
+              Next: Storyboard Preview →
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ── Stage: Storyboard keyframe approval ── */}
+      {stage === 'storyboard' && (
+        <div data-testid="stage-storyboard">
+          <StoryboardPreview
+            style={selectedStyle}
+            scenes={editedPrompts.map(p => ({
+              scene_idx: p.scene_index,
+              storyboard_prompt: p.positive,
+              positive_prompt: p.positive,
+            }))}
+            loraNames={selectedLoraNames}
+            onApprove={(sbId, _approvedPaths) => {
+              setStoryboardId(sbId);
+              void fetchPlan();
+            }}
+            onBack={() => setStage('lora')}
+          />
         </div>
       )}
 

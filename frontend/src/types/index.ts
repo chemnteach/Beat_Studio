@@ -165,6 +165,29 @@ export interface DriftScorecard {
   summary: string;
 }
 
+// ── Storyboard ────────────────────────────────────────────────────────────────
+
+export interface StoryboardVersionEntry {
+  version: number;
+  url: string;
+  seed: number;
+  timestamp: string;
+}
+
+export interface StoryboardSceneResult {
+  scene_idx: number;
+  storyboard_prompt: string;
+  positive_prompt: string;
+  approved_version: number | null;
+  versions: StoryboardVersionEntry[];
+}
+
+export interface StoryboardImagesResponse {
+  storyboard_id: string;
+  status: string;
+  scenes: StoryboardSceneResult[];
+}
+
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
