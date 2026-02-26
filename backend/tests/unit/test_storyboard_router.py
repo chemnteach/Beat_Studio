@@ -363,3 +363,102 @@ class TestServeImageEndpoint:
             "/api/video/storyboard/ghost-id/img/scene_0/v1.png"
         )
         assert resp.status_code == 404
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# lora_weights in regenerate request and images response
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestLoraWeightsIntegration:
+    """Tests that lora_weights flows from regenerate request → service → images response."""
+
+    def _make_state_with_weights(
+        self, storyboard_id: str = "sb-wt"
+    ) -> StoryboardState:
+        """State with a version that has lora_weights stored."""
+        return StoryboardState(
+            storyboard_id=storyboard_id,
+            style="cinematic",
+            base_checkpoint=StoryboardService.SDXL_BASE,
+            lora_names=["rob-character"],
+            status="complete",
+            scenes=[
+                StoryboardScene(
+                    scene_idx=0,
+                    storyboard_prompt="Scene 0: ocean",
+                    positive_prompt="cinematic, ocean",
+                    approved_version=None,
+                    versions=[
+                        VersionEntry(
+                            version=1, filename="v1.png", seed=0, timestamp=_ts(),
+                            lora_weights={"rob-character": 0.35},
+                        )
+                    ],
+                )
+            ],
+        )
+
+    # ── regenerate endpoint accepts lora_weights ──────────────────────────────
+
+    def test_regenerate_accepts_lora_weights_body(self, client, mock_svc):
+        """Endpoint does NOT return 422 when lora_weights is provided."""
+        mock_svc.get_state.return_value = _make_state("sb-wt1")
+        resp = client.post(
+            "/api/video/storyboard/sb-wt1/scene/0/regenerate",
+            json={"lora_weights": {"rob-character": 0.3}},
+        )
+        assert resp.status_code == 202
+
+    def test_regenerate_passes_lora_weights_to_service(self, client, mock_svc):
+        """Service.generate_single_scene receives lora_weights from the request."""
+        mock_svc.get_state.return_value = _make_state("sb-wt2")
+        client.post(
+            "/api/video/storyboard/sb-wt2/scene/0/regenerate",
+            json={"lora_weights": {"rob-character": 0.25}},
+        )
+        call_kwargs = mock_svc.generate_single_scene.call_args[1]
+        assert call_kwargs["lora_weights"] == {"rob-character": 0.25}
+
+    def test_regenerate_without_lora_weights_passes_none(self, client, mock_svc):
+        """Omitting lora_weights from the request body passes None to service."""
+        mock_svc.get_state.return_value = _make_state("sb-wt3")
+        client.post(
+            "/api/video/storyboard/sb-wt3/scene/0/regenerate",
+            json={},  # no lora_weights key
+        )
+        call_kwargs = mock_svc.generate_single_scene.call_args[1]
+        assert call_kwargs["lora_weights"] is None
+
+    def test_regenerate_empty_lora_weights_dict_accepted(self, client, mock_svc):
+        """An empty lora_weights dict is valid and passed through."""
+        mock_svc.get_state.return_value = _make_state("sb-wt4")
+        resp = client.post(
+            "/api/video/storyboard/sb-wt4/scene/0/regenerate",
+            json={"lora_weights": {}},
+        )
+        assert resp.status_code == 202
+        call_kwargs = mock_svc.generate_single_scene.call_args[1]
+        assert call_kwargs["lora_weights"] == {}
+
+    # ── images response includes lora_weights ─────────────────────────────────
+
+    def test_images_response_includes_lora_weights_per_version(
+        self, client, mock_svc
+    ):
+        """GET /images returns lora_weights for each version entry."""
+        mock_svc.get_state.return_value = self._make_state_with_weights("sb-wt5")
+        resp = client.get("/api/video/storyboard/sb-wt5/images")
+        assert resp.status_code == 200
+        version = resp.json()["scenes"][0]["versions"][0]
+        assert version["lora_weights"] == {"rob-character": 0.35}
+
+    def test_images_response_empty_lora_weights_for_old_versions(
+        self, client, mock_svc
+    ):
+        """Versions without lora_weights return {} in the response."""
+        state = _make_state("sb-wt6")  # versions created without lora_weights
+        mock_svc.get_state.return_value = state
+        resp = client.get("/api/video/storyboard/sb-wt6/images")
+        version = resp.json()["scenes"][0]["versions"][0]
+        assert version["lora_weights"] == {}

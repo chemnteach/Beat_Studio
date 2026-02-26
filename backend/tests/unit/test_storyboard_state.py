@@ -269,3 +269,75 @@ class TestSceneDirectory:
         store = StoryboardStateStore(base_dir=tmp_path)
         d = store.scene_dir("new-id", scene_idx=0, create=True)
         assert d.exists()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VersionEntry lora_weights persistence
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestVersionEntryLoraWeights:
+    def test_version_entry_roundtrips_lora_weights(self, tmp_path):
+        """Weights stored on append_version survive a load() roundtrip."""
+        store = StoryboardStateStore(base_dir=tmp_path)
+        store.create(_make_state("weights-roundtrip"))
+        scene_dir = tmp_path / "weights-roundtrip" / "scene_0"
+        scene_dir.mkdir(parents=True, exist_ok=True)
+        (scene_dir / "v1.png").write_bytes(b"fake png")
+
+        entry = VersionEntry(
+            version=1,
+            filename="v1.png",
+            seed=42,
+            timestamp=_ts(),
+            lora_weights={"rob-character": 0.3, "watercolor-style": 0.8},
+        )
+        store.append_version("weights-roundtrip", scene_idx=0, entry=entry)
+
+        loaded = store.load("weights-roundtrip")
+        v = loaded.scenes[0].versions[0]
+        assert v.lora_weights == {"rob-character": 0.3, "watercolor-style": 0.8}
+
+    def test_version_entry_default_empty_weights(self, tmp_path):
+        """VersionEntry with no lora_weights field defaults to empty dict."""
+        entry = VersionEntry(version=1, filename="v1.png", seed=0, timestamp=_ts())
+        assert entry.lora_weights == {}
+
+    def test_backward_compat_state_json_missing_lora_weights(self, tmp_path):
+        """state.json written without lora_weights (old format) loads with {}."""
+        store = StoryboardStateStore(base_dir=tmp_path)
+        state = _make_state("compat-test")
+        store.create(state)
+
+        # Manually add a version entry to state.json without the lora_weights key
+        state_path = tmp_path / "compat-test" / "state.json"
+        raw = json.loads(state_path.read_text())
+        raw["scenes"][0]["versions"] = [
+            {"version": 1, "filename": "v1.png", "seed": 7, "timestamp": _ts()}
+            # lora_weights intentionally omitted
+        ]
+        state_path.write_text(json.dumps(raw))
+
+        loaded = store.load("compat-test")
+        assert loaded.scenes[0].versions[0].lora_weights == {}
+
+    def test_multiple_versions_each_have_own_weights(self, tmp_path):
+        """Different weights per version are independently preserved."""
+        store = StoryboardStateStore(base_dir=tmp_path)
+        store.create(_make_state("multi-weights"))
+        scene_dir = tmp_path / "multi-weights" / "scene_0"
+        scene_dir.mkdir(parents=True, exist_ok=True)
+
+        for v_num, weights in [(1, {"lora_a": 0.7}), (2, {"lora_a": 0.3})]:
+            (scene_dir / f"v{v_num}.png").write_bytes(b"fake")
+            store.append_version(
+                "multi-weights", scene_idx=0,
+                entry=VersionEntry(
+                    version=v_num, filename=f"v{v_num}.png",
+                    seed=v_num, timestamp=_ts(), lora_weights=weights,
+                ),
+            )
+
+        loaded = store.load("multi-weights")
+        assert loaded.scenes[0].versions[0].lora_weights == {"lora_a": 0.7}
+        assert loaded.scenes[0].versions[1].lora_weights == {"lora_a": 0.3}

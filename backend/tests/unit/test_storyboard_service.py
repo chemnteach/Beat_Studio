@@ -540,3 +540,194 @@ class TestDelegates:
 
         assert 0 in paths
         assert "v1.png" in paths[0]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# generate_single_scene — lora_weights override
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestGenerateSingleSceneLoraWeights:
+    """Tests that per-scene weight overrides reach the SDXL pipeline and are persisted."""
+
+    def _make_lora_yaml(self, tmp_path: Path, names: list[str]) -> Path:
+        import yaml
+        loras = [
+            {
+                "name": n,
+                "file_path": f"scene/{n}.safetensors",
+                "trigger_token": n.replace("-", "_"),
+                "type": "scene",
+                "weight": 0.75,   # registry default
+                "status": "available",
+                "tags": [],
+                "source": "local",
+                "source_url": None,
+                "description": f"Test LoRA {n}",
+            }
+            for n in names
+        ]
+        for n in names:
+            p = tmp_path / "scene" / f"{n}.safetensors"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"\x00" * 8)
+        yaml_path = tmp_path / "loras.yaml"
+        yaml_path.write_text(yaml.dump({"loras": loras}))
+        return yaml_path
+
+    def _setup_storyboard_with_loras(
+        self, store, tmp_path, storyboard_id: str, lora_names: list[str]
+    ) -> StoryboardService:
+        from backend.services.storyboard.types import (
+            StoryboardState, StoryboardScene, VersionEntry as VE,
+        )
+        from datetime import datetime, timezone
+        yaml_path = self._make_lora_yaml(tmp_path, lora_names)
+        svc = StoryboardService(
+            state_store=store,
+            vram_manager=MagicMock(),
+            loras_yaml=str(yaml_path),
+            lora_base=tmp_path,
+            device="cpu",
+        )
+        state = StoryboardState(
+            storyboard_id=storyboard_id,
+            style="cinematic",
+            base_checkpoint=StoryboardService.SDXL_BASE,
+            lora_names=lora_names,
+            status="complete",
+            scenes=[
+                StoryboardScene(
+                    scene_idx=0,
+                    storyboard_prompt="Ocean at dusk",
+                    positive_prompt="cinematic film still, ocean at dusk",
+                    approved_version=None,
+                    versions=[
+                        VE(version=1, filename="v1.png", seed=0,
+                           timestamp=datetime.now(timezone.utc).isoformat()),
+                    ],
+                )
+            ],
+        )
+        store.create(state)
+        return svc
+
+    def test_lora_weights_override_calls_set_adapters(
+        self, mock_sdxl, mock_vm, store, tmp_path
+    ):
+        """Weight override triggers pipe.set_adapters with the caller-provided weight."""
+        _, mock_pipe, _ = mock_sdxl
+        svc = self._setup_storyboard_with_loras(store, tmp_path, "wt-1", ["lora-a"])
+        svc._vm = mock_vm
+
+        svc.generate_single_scene(
+            "wt-1", scene_idx=0,
+            prompt_override=None, seed=1,
+            lora_names=["lora-a"],
+            lora_weights={"lora-a": 0.3},
+        )
+
+        # set_adapters should be called with overridden weight 0.3
+        mock_pipe.set_adapters.assert_called()
+        call_kwargs = mock_pipe.set_adapters.call_args
+        weights_arg = call_kwargs[1].get("adapter_weights") or call_kwargs[0][1]
+        assert weights_arg == [0.3], f"Expected [0.3], got {weights_arg}"
+
+    def test_lora_weights_for_unknown_name_falls_back_to_registry_default(
+        self, mock_sdxl, mock_vm, store, tmp_path
+    ):
+        """Weight dict with key not in adapter_names uses registry default (0.75)."""
+        _, mock_pipe, _ = mock_sdxl
+        svc = self._setup_storyboard_with_loras(store, tmp_path, "wt-2", ["lora-a"])
+        svc._vm = mock_vm
+
+        svc.generate_single_scene(
+            "wt-2", scene_idx=0,
+            prompt_override=None, seed=1,
+            lora_names=["lora-a"],
+            lora_weights={"totally-different-lora": 0.9},   # key not in adapters
+        )
+
+        mock_pipe.set_adapters.assert_called()
+        call_kwargs = mock_pipe.set_adapters.call_args
+        weights_arg = call_kwargs[1].get("adapter_weights") or call_kwargs[0][1]
+        # should fall back to registry weight 0.75
+        assert weights_arg == [0.75], f"Expected [0.75], got {weights_arg}"
+
+    def test_no_lora_weights_arg_skips_override_set_adapters(
+        self, mock_sdxl, mock_vm, store, tmp_path
+    ):
+        """When lora_weights is None, set_adapters is not called (single LoRA, no override)."""
+        _, mock_pipe, _ = mock_sdxl
+        svc = self._setup_storyboard_with_loras(store, tmp_path, "wt-3", ["lora-a"])
+        svc._vm = mock_vm
+
+        svc.generate_single_scene(
+            "wt-3", scene_idx=0,
+            prompt_override=None, seed=1,
+            lora_names=["lora-a"],
+            # no lora_weights kwarg → None
+        )
+
+        # single LoRA, no override → set_adapters not called
+        mock_pipe.set_adapters.assert_not_called()
+
+    def test_lora_weights_stored_in_version_entry(
+        self, mock_sdxl, mock_vm, store, tmp_path
+    ):
+        """Weights used for a regen are persisted in the VersionEntry."""
+        svc = self._setup_storyboard_with_loras(store, tmp_path, "wt-4", ["lora-a"])
+        svc._vm = mock_vm
+
+        svc.generate_single_scene(
+            "wt-4", scene_idx=0,
+            prompt_override=None, seed=1,
+            lora_names=["lora-a"],
+            lora_weights={"lora-a": 0.35},
+        )
+
+        loaded = store.load("wt-4")
+        # v2 is the newly generated version
+        latest = loaded.scenes[0].versions[-1]
+        assert latest.lora_weights == {"lora-a": 0.35}
+
+    def test_empty_lora_weights_dict_stores_empty(
+        self, mock_sdxl, mock_vm, store, tmp_path
+    ):
+        """Passing lora_weights={} stores {} in the version entry."""
+        svc = self._setup_storyboard_with_loras(store, tmp_path, "wt-5", [])
+        svc._vm = mock_vm
+
+        svc.generate_single_scene(
+            "wt-5", scene_idx=0,
+            prompt_override=None, seed=1,
+            lora_names=[],
+            lora_weights={},
+        )
+
+        loaded = store.load("wt-5")
+        assert loaded.scenes[0].versions[-1].lora_weights == {}
+
+    def test_two_loras_with_override_applies_both_weights(
+        self, mock_sdxl, mock_vm, store, tmp_path
+    ):
+        """Multiple LoRAs with overrides each get their specified weight."""
+        _, mock_pipe, _ = mock_sdxl
+        svc = self._setup_storyboard_with_loras(
+            store, tmp_path, "wt-6", ["lora-a", "lora-b"]
+        )
+        svc._vm = mock_vm
+
+        svc.generate_single_scene(
+            "wt-6", scene_idx=0,
+            prompt_override=None, seed=1,
+            lora_names=["lora-a", "lora-b"],
+            lora_weights={"lora-a": 0.2, "lora-b": 0.8},
+        )
+
+        # set_adapters called twice: once by _load_loras (registry), once by override
+        calls = mock_pipe.set_adapters.call_args_list
+        # Last call is the override call
+        last_call = calls[-1]
+        weights_arg = last_call[1].get("adapter_weights") or last_call[0][1]
+        assert set(weights_arg) == {0.2, 0.8}, f"Expected {{0.2, 0.8}}, got {weights_arg}"

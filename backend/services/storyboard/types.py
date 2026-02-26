@@ -20,6 +20,7 @@ class VersionEntry:
     filename: str          # e.g. "v1.png" — relative to scene dir
     seed: int
     timestamp: str         # ISO-8601
+    lora_weights: Dict[str, float] = field(default_factory=dict)  # weights used for this version
 
 
 @dataclass

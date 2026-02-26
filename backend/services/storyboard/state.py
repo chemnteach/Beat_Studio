@@ -166,6 +166,7 @@ class StoryboardStateStore:
                             "filename": v.filename,
                             "seed": v.seed,
                             "timestamp": v.timestamp,
+                            "lora_weights": v.lora_weights,
                         }
                         for v in s.versions
                     ],
@@ -189,6 +190,7 @@ class StoryboardStateStore:
                         filename=v["filename"],
                         seed=v["seed"],
                         timestamp=v["timestamp"],
+                        lora_weights=v.get("lora_weights", {}),
                     )
                     for v in s.get("versions", [])
                 ],

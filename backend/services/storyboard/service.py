@@ -103,7 +103,7 @@ class StoryboardService:
 
         pipe = None
         try:
-            pipe, trigger_tokens = self._load_pipeline(lora_names)
+            pipe, _adapter_names, _default_weights, trigger_tokens = self._load_pipeline(lora_names)
             # Trigger tokens prepended to every scene prompt (matches ScenePromptGenerator behaviour)
             trigger_prefix = ", ".join(trigger_tokens) + ", " if trigger_tokens else ""
 
@@ -157,8 +157,15 @@ class StoryboardService:
         prompt_override: Optional[str],
         seed: Optional[int],
         lora_names: List[str],
+        lora_weights: Optional[Dict[str, float]] = None,
     ) -> VersionEntry:
-        """Regenerate one scene, appending a new version. Returns the new VersionEntry."""
+        """Regenerate one scene, appending a new version. Returns the new VersionEntry.
+
+        Args:
+            lora_weights: Optional per-LoRA weight overrides, keyed by registry name
+                (e.g. ``{"rob-character": 0.3}``). LoRAs not in the dict use their
+                registry default weight. Stored in the resulting VersionEntry.
+        """
         state = self._store.load(storyboard_id)
         if state is None:
             raise LookupError(f"Storyboard '{storyboard_id}' not found.")
@@ -174,8 +181,17 @@ class StoryboardService:
 
         pipe = None
         try:
-            pipe, trigger_tokens = self._load_pipeline(lora_names)
+            pipe, adapter_names, default_weights, trigger_tokens = self._load_pipeline(lora_names)
             trigger_prefix = ", ".join(trigger_tokens) + ", " if trigger_tokens else ""
+
+            # Apply per-scene weight overrides when the caller provides them
+            if lora_weights is not None and adapter_names:
+                orig_names = [n.replace("_", "-") for n in adapter_names]
+                override_w = [
+                    lora_weights.get(orig, dw)
+                    for orig, dw in zip(orig_names, default_weights)
+                ]
+                pipe.set_adapters(adapter_names, adapter_weights=override_w)
 
             scene_dir = self._store.scene_dir(storyboard_id, scene_idx, create=True)
             prompt = trigger_prefix + style.prefix + positive_prompt
@@ -198,6 +214,7 @@ class StoryboardService:
                 filename=filename,
                 seed=actual_seed,
                 timestamp=datetime.now(timezone.utc).isoformat(),
+                lora_weights=lora_weights or {},
             )
             self._store.append_version(storyboard_id, scene_idx, entry)
             return entry
@@ -234,8 +251,11 @@ class StoryboardService:
     def _load_pipeline(self, lora_names: List[str]) -> tuple:
         """Load SDXL pipeline, apply LoRAs, register with VRAMManager.
 
-        Returns (pipe, trigger_tokens) where trigger_tokens is the list of
-        trigger strings for all successfully loaded LoRAs.
+        Returns ``(pipe, adapter_names, default_weights, trigger_tokens)`` where:
+        - ``adapter_names`` — diffusers adapter identifiers (underscores) for each
+          loaded LoRA, in load order
+        - ``default_weights`` — registry weight for each adapter (same order)
+        - ``trigger_tokens`` — trigger strings to prepend to every positive prompt
         """
         pipe = StableDiffusionXLPipeline.from_pretrained(
             self._base_checkpoint,
@@ -245,27 +265,32 @@ class StoryboardService:
         ).to(self._device)
 
         self._vm.set_pipeline(pipe, "sdxl_storyboard")
-        trigger_tokens = self._load_loras(pipe, lora_names)
-        return pipe, trigger_tokens
+        adapter_names, default_weights, trigger_tokens = self._load_loras(pipe, lora_names)
+        return pipe, adapter_names, default_weights, trigger_tokens
 
     def _load_loras(
         self,
         pipe: StableDiffusionXLPipeline,
         lora_names: List[str],
-    ) -> List[str]:
+    ) -> tuple:
         """Load each LoRA by name from the registry. Unknown names are skipped.
 
-        Returns the trigger tokens of all successfully loaded LoRAs, in load order.
-        These must be prepended to the positive prompt for the LoRA to activate.
+        Returns ``(adapter_names, default_weights, trigger_tokens)``:
+        - ``adapter_names``   — diffusers adapter identifiers (underscores), in load order
+        - ``default_weights`` — registry weight for each adapter (same order)
+        - ``trigger_tokens``  — trigger strings for all loaded LoRAs, in load order
+
+        The caller is responsible for applying weight overrides via
+        ``pipe.set_adapters`` after this returns.
         """
         if not lora_names:
-            return []
+            return [], [], []
 
         if not self._loras_yaml.exists():
             logger.warning(
                 "loras.yaml not found at %s — skipping LoRA loading", self._loras_yaml
             )
-            return []
+            return [], [], []
 
         registry = LoRARegistry(
             registry_path=str(self._loras_yaml),
@@ -297,7 +322,7 @@ class StoryboardService:
         if len(adapter_names) > 1:
             pipe.set_adapters(adapter_names, adapter_weights=adapter_weights)
 
-        return trigger_tokens
+        return adapter_names, adapter_weights, trigger_tokens
 
     @staticmethod
     def _get_scene(state: StoryboardState, scene_idx: int) -> StoryboardScene:

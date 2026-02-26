@@ -4,13 +4,14 @@
  * Stage flow: lora → storyboard (here) → plan
  *
  * 1. User clicks "Generate Storyboard" → POST /api/video/storyboard/generate
- * 2. Component polls /api/tasks/{taskId} until complete
+ * 2. Component polls /api/tasks/{taskId} until complete (+ secondary image poll for progress)
  * 3. Fetches /api/video/storyboard/{id}/images — shows carousel
- * 4. User can regenerate individual scenes (appends a new version)
- * 5. User selects preferred version per scene, clicks "Approve & Continue"
- * 6. POST /api/video/storyboard/{id}/approve → onApprove callback
+ * 4. Per-scene LoRA weight sliders let the user dial back LoRA influence before regen
+ * 5. User can regenerate individual scenes (appends a new version)
+ * 6. User selects preferred version per scene, clicks "Approve & Continue"
+ * 7. POST /api/video/storyboard/{id}/approve → onApprove callback
  */
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import type { StoryboardImagesResponse, StoryboardSceneResult, StoryboardVersionEntry } from '../types';
 
@@ -18,6 +19,12 @@ interface StoryboardSceneInput {
   scene_idx: number;
   storyboard_prompt: string;
   positive_prompt: string;
+}
+
+interface LoraDetail {
+  name: string;
+  trigger_token: string;
+  type: string;   // "character" | "style" | "scene" | "identity"
 }
 
 interface Props {
@@ -41,14 +48,33 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
   const [regenRunning, setRegenRunning] = useState<Record<number, boolean>>({});
   const [error, setError] = useState('');
   const [isApproving, setIsApproving] = useState(false);
+  // LoRA details fetched from /api/lora/list (filtered to loraNames prop)
+  const [loraDetails, setLoraDetails] = useState<LoraDetail[]>([]);
+  // scene_idx → { lora_name: weight }; default 0.7 per LoRA
+  const [sceneLoraWeights, setSceneLoraWeights] = useState<Record<number, Record<string, number>>>({});
+  // how many scenes have completed images (for generating phase progress bar)
+  const [progressSceneCount, setProgressSceneCount] = useState(0);
 
   const genPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const imgProgressPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const regenPollRefs = useRef<Record<number, ReturnType<typeof setInterval>>>({});
+
+  // Fetch LoRA details once on mount (non-fatal)
+  useEffect(() => {
+    if (loraNames.length === 0) return;
+    axios.get<{ loras: LoraDetail[] }>('/api/lora/list')
+      .then(({ data }) => {
+        const filtered = data.loras.filter(l => loraNames.includes(l.name));
+        setLoraDetails(filtered);
+      })
+      .catch(() => { /* non-fatal */ });
+  }, [loraNames]);
 
   // cleanup on unmount
   useEffect(() => {
     return () => {
       if (genPollRef.current) clearInterval(genPollRef.current);
+      if (imgProgressPollRef.current) clearInterval(imgProgressPollRef.current);
       Object.values(regenPollRefs.current).forEach(clearInterval);
     };
   }, []);
@@ -63,6 +89,30 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [phase, imagesData?.scenes.length]);
+
+  // Return LoRA details active for a given scene (trigger token appears in positive_prompt)
+  const getActiveLorasForScene = useCallback(
+    (scene: StoryboardSceneResult | StoryboardSceneInput): LoraDetail[] => {
+      const prompt = scene.positive_prompt.toLowerCase();
+      return loraDetails.filter(l =>
+        l.trigger_token ? prompt.includes(l.trigger_token.toLowerCase()) : true
+      );
+    },
+    [loraDetails],
+  );
+
+  // Get or initialise the weight map for a scene, defaulting each active LoRA to 0.7
+  const getSceneWeights = useCallback(
+    (sceneIdx: number, activeLoras: LoraDetail[]): Record<string, number> => {
+      const existing = sceneLoraWeights[sceneIdx] ?? {};
+      const result: Record<string, number> = {};
+      activeLoras.forEach(l => {
+        result[l.name] = existing[l.name] ?? 0.7;
+      });
+      return result;
+    },
+    [sceneLoraWeights],
+  );
 
   // Fetch images and update selectedVersions.
   // If forceLatestFor is set, that scene's selection is always updated to the new latest.
@@ -83,6 +133,7 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
 
   const startGeneration = async () => {
     setPhase('generating');
+    setProgressSceneCount(0);
     setError('');
     try {
       const { data } = await axios.post<{ task_id: string; storyboard_id: string }>(
@@ -91,17 +142,33 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
       );
       setStoryboardId(data.storyboard_id);
 
+      // Secondary progress poll: count how many scenes have at least one image
+      imgProgressPollRef.current = setInterval(async () => {
+        try {
+          const { data: imgData } = await axios.get<StoryboardImagesResponse>(
+            `/api/video/storyboard/${data.storyboard_id}/images`
+          );
+          const done = imgData.scenes.filter(s => s.versions.length > 0).length;
+          setProgressSceneCount(done);
+        } catch { /* keep polling */ }
+      }, 3000);
+
+      // Task completion poll
       genPollRef.current = setInterval(async () => {
         try {
           const { data: task } = await axios.get<{ status: string }>(`/api/tasks/${data.task_id}`);
           if (task.status === 'completed') {
             clearInterval(genPollRef.current!);
             genPollRef.current = null;
+            clearInterval(imgProgressPollRef.current!);
+            imgProgressPollRef.current = null;
             await fetchImages(data.storyboard_id);
             setPhase('ready');
           } else if (task.status === 'failed' || task.status === 'cancelled') {
             clearInterval(genPollRef.current!);
             genPollRef.current = null;
+            clearInterval(imgProgressPollRef.current!);
+            imgProgressPollRef.current = null;
             setPhase('failed');
             setError('Generation failed — check server logs and try again');
           }
@@ -118,10 +185,20 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
   const regenerateScene = async (sceneIdx: number, promptOverride?: string) => {
     if (!storyboardId || regenRunning[sceneIdx]) return;
     setRegenRunning(prev => ({ ...prev, [sceneIdx]: true }));
+
+    // Collect current weights for this scene
+    const activeScene_ = imagesData?.scenes.find(s => s.scene_idx === sceneIdx);
+    const activeLoras = activeScene_ ? getActiveLorasForScene(activeScene_) : [];
+    const weights = getSceneWeights(sceneIdx, activeLoras);
+
     try {
       const { data } = await axios.post<{ task_id: string }>(
         `/api/video/storyboard/${storyboardId}/scene/${sceneIdx}/regenerate`,
-        { positive_prompt: promptOverride ?? null, seed: null }
+        {
+          positive_prompt: promptOverride ?? null,
+          seed: null,
+          lora_weights: Object.keys(weights).length > 0 ? weights : null,
+        }
       );
       const taskId = data.task_id;
       regenPollRefs.current[sceneIdx] = setInterval(async () => {
@@ -166,6 +243,36 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
     }
   };
 
+  // Update a single LoRA weight for the active scene
+  const setLoraWeight = (sceneIdx: number, loraName: string, weight: number) => {
+    setSceneLoraWeights(prev => ({
+      ...prev,
+      [sceneIdx]: { ...(prev[sceneIdx] ?? {}), [loraName]: weight },
+    }));
+  };
+
+  // Apply a preset to all active LoRAs for the current scene
+  const applyPreset = (preset: 'style-priority' | 'balanced' | 'lora-priority') => {
+    if (!imagesData) return;
+    const sceneData = imagesData.scenes.find(s => s.scene_idx === activeScene);
+    if (!sceneData) return;
+    const activeLoras = getActiveLorasForScene(sceneData);
+    const newWeights: Record<string, number> = {};
+    activeLoras.forEach(l => {
+      if (preset === 'style-priority') {
+        newWeights[l.name] = l.type === 'character' ? 0.7 : 0.3;
+      } else if (preset === 'balanced') {
+        newWeights[l.name] = 0.6;
+      } else {
+        newWeights[l.name] = 0.9;
+      }
+    });
+    setSceneLoraWeights(prev => ({
+      ...prev,
+      [activeScene]: { ...(prev[activeScene] ?? {}), ...newWeights },
+    }));
+  };
+
   // ── Render: idle (pre-generate) ────────────────────────────────────────────
 
   if (phase === 'idle') {
@@ -191,12 +298,27 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
   // ── Render: generating ─────────────────────────────────────────────────────
 
   if (phase === 'generating') {
+    const pct = scenes.length > 0 ? Math.round((progressSceneCount / scenes.length) * 100) : 0;
     return (
       <div data-testid="stage-storyboard-generating" style={{ textAlign: 'center', padding: '40px 0' }}>
         <div style={{ fontSize: '2rem', marginBottom: '12px' }}>🎨</div>
         <p style={{ fontSize: '1rem', marginBottom: '8px' }}>
           Generating {scenes.length} storyboard frames with SDXL…
         </p>
+        {progressSceneCount > 0 && (
+          <p style={{ color: '#aaa', fontSize: '0.88rem', marginBottom: '12px' }}>
+            {progressSceneCount} of {scenes.length} scenes ready
+          </p>
+        )}
+        <div style={{
+          background: '#0f3460', borderRadius: '6px', height: '6px',
+          width: '240px', margin: '0 auto 8px',
+        }}>
+          <div style={{
+            background: '#e94560', height: '6px', borderRadius: '6px',
+            width: `${pct}%`, transition: 'width 0.4s',
+          }} />
+        </div>
         <p style={{ color: '#888', fontSize: '0.82rem' }}>
           Takes ~30–90 seconds depending on GPU and number of scenes
         </p>
@@ -231,6 +353,10 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
     activeSceneData?.versions.find(v => v.version === selectedVersion);
 
   const isActiveRegen = regenRunning[activeScene] ?? false;
+
+  // LoRA sliders for the active scene
+  const activeSceneLoras = activeSceneData ? getActiveLorasForScene(activeSceneData) : [];
+  const currentWeights = getSceneWeights(activeScene, activeSceneLoras);
 
   return (
     <div data-testid="stage-storyboard-ready">
@@ -269,8 +395,8 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
           )}
         </div>
 
-        {/* Right panel: scene info + version picker + regen */}
-        <div style={{ width: '190px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {/* Right panel: scene info + version picker + regen + LoRA sliders */}
+        <div style={{ width: '200px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>
             Scene {activeScene + 1} of {imagesData?.scenes.length}
           </div>
@@ -290,23 +416,30 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
                 Versions
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                {activeSceneData.versions.map(v => (
-                  <button
-                    key={v.version}
-                    onClick={() => setSelectedVersions(prev => ({ ...prev, [activeScene]: v.version }))}
-                    title={`Seed: ${v.seed}`}
-                    style={{
-                      padding: '3px 9px',
-                      fontSize: '0.75rem',
-                      background: selectedVersion === v.version ? '#e94560' : '#16213e',
-                      border: `1px solid ${selectedVersion === v.version ? '#e94560' : '#0f3460'}`,
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    v{v.version}
-                  </button>
-                ))}
+                {activeSceneData.versions.map(v => {
+                  const weightEntries = Object.entries(v.lora_weights ?? {});
+                  const weightTip = weightEntries.length > 0
+                    ? ` | Weights: ${weightEntries.map(([k, w]) => `${k}=${w}`).join(', ')}`
+                    : '';
+                  return (
+                    <button
+                      key={v.version}
+                      data-testid={`version-btn-${activeScene}-${v.version}`}
+                      onClick={() => setSelectedVersions(prev => ({ ...prev, [activeScene]: v.version }))}
+                      title={`Seed: ${v.seed}${weightTip}`}
+                      style={{
+                        padding: '3px 9px',
+                        fontSize: '0.75rem',
+                        background: selectedVersion === v.version ? '#e94560' : '#16213e',
+                        border: `1px solid ${selectedVersion === v.version ? '#e94560' : '#0f3460'}`,
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      v{v.version}
+                    </button>
+                  );
+                })}
                 {/* Optimistic placeholder — visible while a new version is being generated */}
                 {isActiveRegen && (
                   <button
@@ -329,12 +462,76 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
           )}
 
           <button
+            data-testid="regenerate-scene-btn"
             onClick={() => void regenerateScene(activeScene)}
             disabled={isActiveRegen}
             style={{ fontSize: '0.8rem', background: '#0f3460' }}
           >
             {isActiveRegen ? '⟳ Generating…' : '↺ Regenerate Scene'}
           </button>
+
+          {/* ── LoRA weight sliders ── */}
+          {activeSceneLoras.length > 0 && (
+            <div>
+              <div style={{ fontSize: '0.7rem', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '6px' }}>
+                LoRA Weights
+              </div>
+              {activeSceneLoras.map(l => {
+                const w = currentWeights[l.name] ?? 0.7;
+                return (
+                  <div key={l.name} style={{ marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', marginBottom: '2px' }}>
+                      <span style={{ color: '#aaa' }}>{l.name}</span>
+                      <span
+                        data-testid={`lora-weight-value-${l.name}`}
+                        style={{ color: '#e94560', minWidth: '28px', textAlign: 'right' }}
+                      >
+                        {w.toFixed(1)}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      value={w}
+                      data-testid={`lora-weight-slider-${l.name}`}
+                      onChange={e => setLoraWeight(activeScene, l.name, parseFloat(e.target.value))}
+                      style={{ width: '100%', accentColor: '#e94560' }}
+                    />
+                  </div>
+                );
+              })}
+
+              {/* Weight presets */}
+              <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
+                <button
+                  data-testid="preset-style-priority"
+                  onClick={() => applyPreset('style-priority')}
+                  title="Character LoRAs → 0.7 | Style LoRAs → 0.3"
+                  style={{ fontSize: '0.65rem', padding: '2px 6px', background: '#0f3460' }}
+                >
+                  Style
+                </button>
+                <button
+                  data-testid="preset-balanced"
+                  onClick={() => applyPreset('balanced')}
+                  title="All LoRAs → 0.6"
+                  style={{ fontSize: '0.65rem', padding: '2px 6px', background: '#0f3460' }}
+                >
+                  Balanced
+                </button>
+                <button
+                  data-testid="preset-lora-priority"
+                  onClick={() => applyPreset('lora-priority')}
+                  title="All LoRAs → 0.9"
+                  style={{ fontSize: '0.65rem', padding: '2px 6px', background: '#0f3460' }}
+                >
+                  LoRA
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Scene navigation arrows */}
           <div style={{ display: 'flex', gap: '6px' }}>

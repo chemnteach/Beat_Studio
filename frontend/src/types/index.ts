@@ -172,6 +172,7 @@ export interface StoryboardVersionEntry {
   url: string;
   seed: number;
   timestamp: string;
+  lora_weights: Record<string, number>;
 }
 
 export interface StoryboardSceneResult {

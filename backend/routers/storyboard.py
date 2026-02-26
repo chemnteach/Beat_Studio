@@ -79,6 +79,7 @@ class StoryboardGenerateRequest(BaseModel):
 class StoryboardRegenerateRequest(BaseModel):
     seed: Optional[int] = None                  # None → random seed
     positive_prompt: Optional[str] = None       # None → reuse existing prompt
+    lora_weights: Optional[Dict[str, float]] = None  # per-LoRA weight overrides keyed by registry name
 
 
 class StoryboardApproveRequest(BaseModel):
@@ -91,6 +92,7 @@ class VersionEntryResponse(BaseModel):
     url: str                                    # e.g. /api/video/storyboard/{id}/img/scene_0/v1.png
     seed: int
     timestamp: str
+    lora_weights: Dict[str, float] = {}        # weights used when generating this version
 
 
 class StoryboardSceneResponse(BaseModel):
@@ -140,6 +142,7 @@ def _run_regenerate_scene(
     prompt_override: Optional[str],
     seed: Optional[int],
     lora_names: List[str],
+    lora_weights: Optional[Dict[str, float]],
 ) -> None:
     """Background worker: regenerate a single scene keyframe."""
     tm = _get_task_manager()
@@ -151,6 +154,7 @@ def _run_regenerate_scene(
             prompt_override=prompt_override,
             seed=seed,
             lora_names=lora_names,
+            lora_weights=lora_weights,
         )
         tm.complete_task(task_id, {"storyboard_id": storyboard_id, "scene_idx": scene_idx})
     except Exception as exc:
@@ -215,6 +219,7 @@ async def get_storyboard_images(storyboard_id: str) -> StoryboardImagesResponse:
                 url=f"/api/video/storyboard/{storyboard_id}/img/scene_{scene.scene_idx}/{v.filename}",
                 seed=v.seed,
                 timestamp=v.timestamp,
+                lora_weights=v.lora_weights,
             )
             for v in scene.versions
         ]
@@ -260,6 +265,7 @@ async def regenerate_scene(
         request.positive_prompt,
         request.seed,
         state.lora_names,
+        request.lora_weights,
     )
     return {
         "task_id": task_id,
