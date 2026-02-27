@@ -66,11 +66,11 @@ class TaskManager:
     # Absolute default so it resolves correctly regardless of process CWD.
     _DEFAULT_DB = str(Path(__file__).parent.parent.parent / "tasks.db")
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, recovery_grace_seconds: float = 60.0):
         self._db_path = db_path or self._DEFAULT_DB
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
-        self.recover_stuck_tasks()
+        self.recover_stuck_tasks(grace_seconds=recovery_grace_seconds)
 
     # ── private ──────────────────────────────────────────────────────────────
 
@@ -84,20 +84,26 @@ class TaskManager:
         with self._connect() as conn:
             conn.execute(self._CREATE_TABLE)
 
-    def recover_stuck_tasks(self) -> int:
-        """Mark any tasks left running/pending from a previous server process as failed.
+    def recover_stuck_tasks(self, grace_seconds: float = 60.0) -> int:
+        """Mark tasks left running/pending from a previous server process as failed.
+
+        A grace window (default 60 s) protects tasks that were just submitted —
+        during rapid --reload cycles a task can be created milliseconds before the
+        new worker calls this method, and we must not kill it prematurely.
 
         Called at startup so tasks never stay permanently stuck after a crash.
         Returns the number of tasks recovered.
         """
         now = time.time()
+        cutoff = now - grace_seconds
         with self._connect() as conn:
             cur = conn.execute(
                 """UPDATE tasks
                    SET status='failed', error='Server restarted while task was in progress',
                        updated_at=?
-                   WHERE status IN ('running', 'pending')""",
-                (now,),
+                   WHERE status IN ('running', 'pending')
+                   AND updated_at < ?""",
+                (now, cutoff),
             )
         count = cur.rowcount
         if count:

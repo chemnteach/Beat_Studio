@@ -74,8 +74,9 @@ class TestTaskPersistence:
         task_id = mgr1.create_task("video_generation", {"key": "value"})
         mgr1.update_progress(task_id, "generating", 25.0, "In progress")
 
-        # New instance — simulates server restart; crash recovery marks it failed
-        mgr2 = TaskManager(db_path=db_path)
+        # New instance — simulates server restart; crash recovery marks it failed.
+        # Use grace_seconds=0 so the just-created task is not protected by the grace window.
+        mgr2 = TaskManager(db_path=db_path, recovery_grace_seconds=0)
         state = mgr2.get_status(task_id)
         assert state.status == TaskStatus.FAILED
         assert "restarted" in state.error.lower()
