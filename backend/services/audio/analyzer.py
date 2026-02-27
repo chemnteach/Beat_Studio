@@ -77,8 +77,10 @@ def _analyze_signal_basic(y: np.ndarray, sr: int) -> Dict[str, Any]:
     camelot = key_to_camelot(key)
 
     rms = librosa.feature.rms(y=y)[0]
-    # Normalize RMS to [0, 1]: 0.1 RMS ≈ loud music; clip above 1.0
-    energy_level = float(min(np.mean(rms) / 0.1, 1.0))
+    # Raw RMS as energy level: typical music runs 0.05–0.35 (5–35% displayed).
+    # Do not divide by a constant — modern mastered tracks easily exceed 0.1 RMS,
+    # which caused everything to saturate at 100%.
+    energy_level = float(np.mean(rms))
 
     duration = librosa.get_duration(y=y, sr=sr)
 
