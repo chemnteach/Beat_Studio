@@ -375,7 +375,8 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
               position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
               justifyContent: 'center', background: 'rgba(22,33,62,0.75)', borderRadius: '8px', zIndex: 1,
             }}>
-              <span style={{ color: '#e0e0e0', fontSize: '0.9rem' }}>⟳ Generating…</span>
+              <span className="spin" style={{ color: '#e94560', fontSize: '1.4rem', marginRight: '8px' }}>⟳</span>
+              <span style={{ color: '#e0e0e0', fontSize: '0.9rem' }}>Generating…</span>
             </div>
           )}
           {selectedEntry ? (
@@ -470,7 +471,7 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
             disabled={isActiveRegen}
             style={{ fontSize: '0.8rem', background: '#0f3460' }}
           >
-            {isActiveRegen ? '⟳ Generating…' : '↺ Regenerate Scene'}
+            {isActiveRegen ? <><span className="spin">⟳</span> Generating…</> : '↺ Regenerate Scene'}
           </button>
 
           {/* ── LoRA weight sliders ── */}
@@ -640,7 +641,7 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
                 textAlign: 'center',
                 fontWeight: isActive ? 'bold' : 'normal',
               }}>
-                {isRegen ? '⟳' : `#${s.scene_idx + 1}`}
+                {isRegen ? <span className="spin">⟳</span> : `#${s.scene_idx + 1}`}
               </div>
             </div>
           );

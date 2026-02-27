@@ -373,7 +373,7 @@ class TestGenerateAllScenesLoRA:
 
         mock_pipe.set_adapters.assert_called_once()
 
-    def test_set_adapters_not_called_for_single_lora(
+    def test_set_adapters_called_for_single_lora(
         self, mock_sdxl, mock_vm, store, tmp_path
     ):
         _, mock_pipe, _ = mock_sdxl
@@ -388,7 +388,7 @@ class TestGenerateAllScenesLoRA:
 
         svc.generate_all_scenes("id-l5", _make_scenes(1), "cinematic", ["lora_a"])
 
-        mock_pipe.set_adapters.assert_not_called()
+        mock_pipe.set_adapters.assert_called_once_with(["lora_a"], adapter_weights=[0.75])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -657,7 +657,8 @@ class TestGenerateSingleSceneLoraWeights:
     def test_no_lora_weights_arg_skips_override_set_adapters(
         self, mock_sdxl, mock_vm, store, tmp_path
     ):
-        """When lora_weights is None, set_adapters is not called (single LoRA, no override)."""
+        """When lora_weights is None, set_adapters is called once (from _load_loras)
+        but NOT a second time — the per-scene override branch is skipped."""
         _, mock_pipe, _ = mock_sdxl
         svc = self._setup_storyboard_with_loras(store, tmp_path, "wt-3", ["lora-a"])
         svc._vm = mock_vm
@@ -669,8 +670,8 @@ class TestGenerateSingleSceneLoraWeights:
             # no lora_weights kwarg → None
         )
 
-        # single LoRA, no override → set_adapters not called
-        mock_pipe.set_adapters.assert_not_called()
+        # _load_loras calls set_adapters once with registry weight; no override call
+        mock_pipe.set_adapters.assert_called_once_with(["lora_a"], adapter_weights=[0.75])
 
     def test_lora_weights_stored_in_version_entry(
         self, mock_sdxl, mock_vm, store, tmp_path

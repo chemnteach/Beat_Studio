@@ -319,7 +319,7 @@ class StoryboardService:
             except Exception as exc:
                 logger.warning("Failed to load LoRA '%s': %s — skipping", name, exc)
 
-        if len(adapter_names) > 1:
+        if adapter_names:
             pipe.set_adapters(adapter_names, adapter_weights=adapter_weights)
 
         return adapter_names, adapter_weights, trigger_tokens
