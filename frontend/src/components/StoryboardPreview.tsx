@@ -52,6 +52,8 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
   const [loraDetails, setLoraDetails] = useState<LoraDetail[]>([]);
   // scene_idx → { lora_name: weight }; default 0.7 per LoRA
   const [sceneLoraWeights, setSceneLoraWeights] = useState<Record<number, Record<string, number>>>({});
+  // scene_idx → user-edited positive_prompt; undefined = keep original
+  const [promptEdits, setPromptEdits] = useState<Record<number, string>>({});
   // how many scenes have completed images (for generating phase progress bar)
   const [progressSceneCount, setProgressSceneCount] = useState(0);
 
@@ -182,20 +184,21 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
     }
   };
 
-  const regenerateScene = async (sceneIdx: number, promptOverride?: string) => {
+  const regenerateScene = async (sceneIdx: number) => {
     if (!storyboardId || regenRunning[sceneIdx]) return;
     setRegenRunning(prev => ({ ...prev, [sceneIdx]: true }));
 
-    // Collect current weights for this scene
+    // Collect current weights and prompt edit for this scene
     const activeScene_ = imagesData?.scenes.find(s => s.scene_idx === sceneIdx);
     const activeLoras = activeScene_ ? getActiveLorasForScene(activeScene_) : [];
     const weights = getSceneWeights(sceneIdx, activeLoras);
+    const editedPrompt = promptEdits[sceneIdx]?.trim() || null;
 
     try {
       const { data } = await axios.post<{ task_id: string }>(
         `/api/video/storyboard/${storyboardId}/scene/${sceneIdx}/regenerate`,
         {
-          positive_prompt: promptOverride ?? null,
+          positive_prompt: editedPrompt,
           seed: null,
           lora_weights: Object.keys(weights).length > 0 ? weights : null,
         }
@@ -530,6 +533,45 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
                   LoRA
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* ── Prompt override ── */}
+          {activeSceneData && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <span style={{ fontSize: '0.7rem', color: '#666', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  Prompt
+                </span>
+                {promptEdits[activeScene] !== undefined && (
+                  <button
+                    data-testid="prompt-reset-btn"
+                    onClick={() => setPromptEdits(prev => { const n = { ...prev }; delete n[activeScene]; return n; })}
+                    title="Reset to original prompt"
+                    style={{ fontSize: '0.6rem', padding: '1px 5px', background: '#16213e', color: '#888' }}
+                  >
+                    reset
+                  </button>
+                )}
+              </div>
+              <textarea
+                data-testid="prompt-edit-textarea"
+                value={promptEdits[activeScene] ?? activeSceneData.positive_prompt}
+                onChange={e => setPromptEdits(prev => ({ ...prev, [activeScene]: e.target.value }))}
+                rows={4}
+                style={{
+                  width: '100%',
+                  fontSize: '0.7rem',
+                  background: '#0a1a2e',
+                  border: `1px solid ${promptEdits[activeScene] !== undefined ? '#e94560' : '#0f3460'}`,
+                  borderRadius: '4px',
+                  color: '#e0e0e0',
+                  padding: '5px',
+                  resize: 'vertical',
+                  boxSizing: 'border-box',
+                  lineHeight: 1.5,
+                }}
+              />
             </div>
           )}
 
