@@ -170,9 +170,10 @@ export interface DriftScorecard {
 export interface StoryboardVersionEntry {
   version: number;
   url: string;
-  seed: number;
+  seed: number | null;    // null for uploaded images
   timestamp: string;
   lora_weights: Record<string, number>;
+  source?: string;        // "generated" | "upload" (absent in old state files → treat as "generated")
 }
 
 export interface StoryboardSceneResult {

@@ -57,6 +57,12 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
   // how many scenes have completed images (for generating phase progress bar)
   const [progressSceneCount, setProgressSceneCount] = useState(0);
 
+  // Upload state
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadToast, setUploadToast] = useState('');
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+
   const genPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const imgProgressPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const regenPollRefs = useRef<Record<number, ReturnType<typeof setInterval>>>({});
@@ -246,6 +252,34 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
     }
   };
 
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset the input so selecting the same file again still triggers onChange
+    e.target.value = '';
+    if (!file || !storyboardId) return;
+    setIsUploading(true);
+    setUploadError('');
+    setUploadToast('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await axios.post<{ uploaded: number; snapshot_id: string }>(
+        `/api/video/storyboard/${storyboardId}/upload`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      await fetchImages(storyboardId);
+      setUploadToast(`Uploaded ${data.uploaded} scenes (snapshot saved)`);
+      setTimeout(() => setUploadToast(''), 4000);
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        ?? 'Upload failed';
+      setUploadError(detail);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   // Update a single LoRA weight for the active scene
   const setLoraWeight = (sceneIdx: number, loraName: string, weight: number) => {
     setSceneLoraWeights(prev => ({
@@ -421,16 +455,20 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                 {activeSceneData.versions.map(v => {
+                  const isUpload = v.source === 'upload';
                   const weightEntries = Object.entries(v.lora_weights ?? {});
                   const weightTip = weightEntries.length > 0
                     ? ` | Weights: ${weightEntries.map(([k, w]) => `${k}=${w}`).join(', ')}`
                     : '';
+                  const titleText = isUpload
+                    ? `Uploaded at ${v.timestamp}${weightTip}`
+                    : `Seed: ${v.seed}${weightTip}`;
                   return (
                     <button
                       key={v.version}
                       data-testid={`version-btn-${activeScene}-${v.version}`}
                       onClick={() => setSelectedVersions(prev => ({ ...prev, [activeScene]: v.version }))}
-                      title={`Seed: ${v.seed}${weightTip}`}
+                      title={titleText}
                       style={{
                         padding: '3px 9px',
                         fontSize: '0.75rem',
@@ -440,7 +478,7 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
                         cursor: 'pointer',
                       }}
                     >
-                      v{v.version}
+                      v{v.version}{isUpload && <span data-testid={`upload-badge-${activeScene}-${v.version}`} style={{ marginLeft: '3px', fontSize: '0.65rem' }}>↑</span>}
                     </button>
                   );
                 })}
@@ -650,6 +688,25 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
 
       {error && <p className="error" style={{ marginBottom: '12px' }}>{error}</p>}
 
+      {uploadToast && (
+        <p style={{ color: '#2ecc71', marginBottom: '8px', fontSize: '0.85rem' }}
+           data-testid="upload-toast">{uploadToast}</p>
+      )}
+      {uploadError && (
+        <p className="error" style={{ marginBottom: '8px' }}
+           data-testid="upload-error">{uploadError}</p>
+      )}
+
+      {/* Hidden file input — triggered by the Upload ZIP button */}
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept=".zip"
+        data-testid="upload-storyboard-input"
+        style={{ display: 'none' }}
+        onChange={handleUpload}
+      />
+
       <div className="stage-nav">
         <button onClick={onBack}>← Back to LoRA</button>
         <a
@@ -664,6 +721,17 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
         >
           ↓ Download ZIP
         </a>
+        <button
+          onClick={() => uploadInputRef.current?.click()}
+          disabled={isUploading || !storyboardId}
+          data-testid="upload-storyboard-btn"
+          style={{
+            padding: '8px 18px', borderRadius: '6px', background: '#0f3460',
+            color: '#e0e0e0', fontSize: '0.9rem',
+          }}
+        >
+          {isUploading ? 'Uploading…' : '↑ Upload ZIP'}
+        </button>
         <button
           onClick={() => void handleApprove()}
           disabled={isApproving}

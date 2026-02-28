@@ -246,6 +246,166 @@ class StoryboardService:
         """Record approved version per scene. Returns {scene_idx: abs_path}."""
         return self._store.set_approved(storyboard_id, selections)
 
+    def create_snapshot(self, storyboard_id: str) -> Dict:
+        """Snapshot the current state of a storyboard. Returns snapshot metadata."""
+        if self._store.load(storyboard_id) is None:
+            raise LookupError(f"Storyboard '{storyboard_id}' not found.")
+        return self._store.create_snapshot(storyboard_id)
+
+    def list_snapshots(self, storyboard_id: str) -> List[Dict]:
+        """List all snapshots for *storyboard_id*, newest first."""
+        if self._store.load(storyboard_id) is None:
+            raise LookupError(f"Storyboard '{storyboard_id}' not found.")
+        return self._store.list_snapshots(storyboard_id)
+
+    def restore_snapshot(self, storyboard_id: str, snapshot_id: str) -> Dict:
+        """Restore a snapshot by adding its images as new versions (non-destructive).
+
+        Creates a backup snapshot before applying, so restore is reversible.
+
+        Returns:
+            ``{"restored_from": snapshot_id, "backup_snapshot_id": <new_ts>}``
+        """
+        import shutil
+
+        state = self._store.load(storyboard_id)
+        if state is None:
+            raise LookupError(f"Storyboard '{storyboard_id}' not found.")
+
+        snap_dir = self._store.snapshot_dir(storyboard_id, snapshot_id)
+        if not snap_dir.exists():
+            raise LookupError(f"Snapshot '{snapshot_id}' not found in storyboard '{storyboard_id}'.")
+
+        # Backup current state before restoring
+        backup = self._store.create_snapshot(storyboard_id)
+
+        ts = datetime.now(timezone.utc).isoformat()
+        for scene in sorted(state.scenes, key=lambda s: s.scene_idx):
+            src = snap_dir / f"scene_{scene.scene_idx:02d}.png"
+            if not src.exists():
+                continue
+
+            current_state = self._store.load(storyboard_id)
+            current_scene = self._get_scene(current_state, scene.scene_idx)
+            next_version = (max(v.version for v in current_scene.versions) + 1) if current_scene.versions else 1
+            dest_filename = f"v{next_version}.png"
+
+            scene_dir = self._store.scene_dir(storyboard_id, scene.scene_idx, create=True)
+            shutil.copy2(src, scene_dir / dest_filename)
+
+            entry = VersionEntry(
+                version=next_version,
+                filename=dest_filename,
+                seed=None,
+                timestamp=ts,
+                lora_weights={},
+                source="upload",
+            )
+            self._store.append_version(storyboard_id, scene.scene_idx, entry)
+
+        return {"restored_from": snapshot_id, "backup_snapshot_id": backup["snapshot_id"]}
+
+    def upload_zip(self, storyboard_id: str, zip_bytes: bytes) -> Dict:
+        """Process an uploaded ZIP of storyboard images.
+
+        Validates the ZIP, creates a snapshot of the current state, then adds
+        each uploaded image as a new version (``source="upload"``) for the
+        corresponding scene.
+
+        Args:
+            storyboard_id: The storyboard session ID.
+            zip_bytes: Raw bytes of the uploaded ZIP file.
+
+        Returns:
+            ``{"uploaded": <n>, "snapshot_id": "<auto_snapshot_ts>"}``
+
+        Raises:
+            LookupError: If storyboard_id is not found.
+            ValueError: If the ZIP is invalid (bad format, wrong scene count, bad PNG).
+        """
+        import io
+        import re
+        import zipfile
+
+        from PIL import Image
+
+        state = self._store.load(storyboard_id)
+        if state is None:
+            raise LookupError(f"Storyboard '{storyboard_id}' not found.")
+
+        # ── Validate ZIP structure ────────────────────────────────────────────
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+        except zipfile.BadZipFile as exc:
+            raise ValueError("Not a valid ZIP file.") from exc
+
+        expected = len(state.scenes)
+
+        # Collect scene files — ignore __MACOSX and non-scene entries
+        scene_files: Dict[int, str] = {}
+        for name in zf.namelist():
+            if name.startswith("__MACOSX"):
+                continue
+            basename = Path(name).name
+            m = re.match(r"^scene_(\d+)\.png$", basename)
+            if m:
+                scene_num = int(m.group(1))
+                scene_files[scene_num] = name
+
+        if len(scene_files) != expected:
+            raise ValueError(
+                f"ZIP contains {len(scene_files)} scene file(s), "
+                f"storyboard has {expected}. "
+                f"Expected scene_01.png through scene_{expected:02d}.png."
+            )
+
+        expected_nums = set(range(1, expected + 1))
+        missing = expected_nums - set(scene_files.keys())
+        if missing:
+            names = ", ".join(f"scene_{n:02d}.png" for n in sorted(missing))
+            raise ValueError(f"Missing scene files in ZIP: {names}")
+
+        # Validate each file is a real PNG (verify() on a copy since it's destructive)
+        for scene_num in sorted(scene_files.keys()):
+            data = zf.read(scene_files[scene_num])
+            try:
+                img = Image.open(io.BytesIO(data))
+                img.verify()
+            except Exception as exc:
+                raise ValueError(
+                    f"scene_{scene_num:02d}.png is not a valid PNG image: {exc}"
+                ) from exc
+
+        # ── Apply (all validation passed) ─────────────────────────────────────
+        snapshot_result = self._store.create_snapshot(storyboard_id)
+
+        ts = datetime.now(timezone.utc).isoformat()
+        sorted_scenes = sorted(state.scenes, key=lambda s: s.scene_idx)
+
+        for position, scene_num in enumerate(sorted(scene_files.keys())):
+            scene_idx = sorted_scenes[position].scene_idx
+            current_state = self._store.load(storyboard_id)
+            current_scene = self._get_scene(current_state, scene_idx)
+            next_version = (max(v.version for v in current_scene.versions) + 1) if current_scene.versions else 1
+            dest_filename = f"v{next_version}.png"
+
+            scene_dir = self._store.scene_dir(storyboard_id, scene_idx, create=True)
+            raw = zf.read(scene_files[scene_num])
+            img = Image.open(io.BytesIO(raw))
+            img.save(scene_dir / dest_filename, format="PNG")
+
+            entry = VersionEntry(
+                version=next_version,
+                filename=dest_filename,
+                seed=None,
+                timestamp=ts,
+                lora_weights={},
+                source="upload",
+            )
+            self._store.append_version(storyboard_id, scene_idx, entry)
+
+        return {"uploaded": len(scene_files), "snapshot_id": snapshot_result["snapshot_id"]}
+
     # ── internal ──────────────────────────────────────────────────────────────
 
     def _load_pipeline(self, lora_names: List[str]) -> tuple:

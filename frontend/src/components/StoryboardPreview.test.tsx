@@ -380,3 +380,159 @@ describe('StoryboardPreview — LoRA weight sliders', () => {
     expect(v1btn.getAttribute('title')).toContain('0.35')
   })
 })
+
+describe('StoryboardPreview — ZIP upload', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    mockedAxios.get = vi.fn()
+    mockedAxios.post = vi.fn()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.clearAllMocks()
+  })
+
+  /** Drive the component to 'ready' phase, same helper pattern as LoRA weight tests. */
+  async function renderReadyStateForUpload() {
+    mockedAxios.post = vi.fn().mockResolvedValue({
+      data: { task_id: 'task-up', storyboard_id: 'sb-test' },
+    })
+    mockedAxios.get = vi.fn()
+      .mockResolvedValueOnce({ data: LORA_LIST_RESPONSE })
+      .mockResolvedValueOnce({ data: { status: 'completed' } })
+      .mockResolvedValue({ data: makeImagesResponse(2) })
+
+    render(<StoryboardPreview {...makeProps()} />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('generate-storyboard-btn'))
+    })
+    await flush()
+
+    act(() => { vi.advanceTimersByTime(2500) })
+    await flush()
+    await flush()
+    await flush()
+
+    expect(screen.getByTestId('stage-storyboard-ready')).toBeInTheDocument()
+  }
+
+  it('upload button renders in stage-nav', async () => {
+    await renderReadyStateForUpload()
+    expect(screen.getByTestId('upload-storyboard-btn')).toBeInTheDocument()
+  })
+
+  it('upload sends file to the correct endpoint', async () => {
+    await renderReadyStateForUpload()
+
+    mockedAxios.post = vi.fn().mockResolvedValue({
+      data: { uploaded: 2, snapshot_id: 'snap-1' },
+    })
+
+    const input = screen.getByTestId('upload-storyboard-input') as HTMLInputElement
+    const file = new File([new Uint8Array([1, 2, 3])], 'storyboard.zip', { type: 'application/zip' })
+
+    await act(async () => {
+      Object.defineProperty(input, 'files', { value: [file], configurable: true })
+      fireEvent.change(input)
+    })
+    await flush()
+    await flush()
+
+    const uploadCall = mockedAxios.post.mock.calls.find((c: unknown[]) =>
+      typeof c[0] === 'string' && (c[0] as string).includes('upload')
+    )
+    expect(uploadCall).toBeDefined()
+    expect(uploadCall![1]).toBeInstanceOf(FormData)
+  })
+
+  it('upload success shows toast and refreshes images', async () => {
+    await renderReadyStateForUpload()
+
+    mockedAxios.post = vi.fn().mockResolvedValue({
+      data: { uploaded: 2, snapshot_id: 'snap-1' },
+    })
+    const getCallsBefore = (mockedAxios.get as ReturnType<typeof vi.fn>).mock.calls.length
+
+    const input = screen.getByTestId('upload-storyboard-input') as HTMLInputElement
+    const file = new File([new Uint8Array([1, 2, 3])], 'test.zip', { type: 'application/zip' })
+
+    await act(async () => {
+      Object.defineProperty(input, 'files', { value: [file], configurable: true })
+      fireEvent.change(input)
+    })
+    await flush()
+    await flush()
+
+    expect(screen.getByTestId('upload-toast')).toBeInTheDocument()
+    expect(screen.getByTestId('upload-toast').textContent).toContain('2 scenes')
+    // fetchImages should have been called once more
+    expect((mockedAxios.get as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(getCallsBefore)
+  })
+
+  it('upload 422 error shows validation message', async () => {
+    await renderReadyStateForUpload()
+
+    mockedAxios.post = vi.fn().mockRejectedValue({
+      response: { status: 422, data: { detail: 'ZIP contains 2 scenes, storyboard has 3' } },
+    })
+
+    const input = screen.getByTestId('upload-storyboard-input') as HTMLInputElement
+    const file = new File([new Uint8Array([1, 2, 3])], 'bad.zip', { type: 'application/zip' })
+
+    await act(async () => {
+      Object.defineProperty(input, 'files', { value: [file], configurable: true })
+      fireEvent.change(input)
+    })
+    await flush()
+    await flush()
+
+    const errEl = screen.getByTestId('upload-error')
+    expect(errEl).toBeInTheDocument()
+    expect(errEl.textContent).toContain('ZIP contains')
+  })
+
+  it('uploaded version shows ↑ upload badge', async () => {
+    const imagesWithUpload = makeImagesResponse(2)
+    imagesWithUpload.scenes[0].versions = [
+      { version: 1, url: '/img/scene_0/v1.png', seed: 42, timestamp: 'ts', lora_weights: {}, source: 'generated' },
+      { version: 2, url: '/img/scene_0/v2.png', seed: null, timestamp: 'ts2', lora_weights: {}, source: 'upload' },
+    ]
+
+    mockedAxios.post = vi.fn().mockResolvedValue({
+      data: { task_id: 'task-badge', storyboard_id: 'sb-test' },
+    })
+    mockedAxios.get = vi.fn()
+      .mockResolvedValueOnce({ data: LORA_LIST_RESPONSE })
+      .mockResolvedValueOnce({ data: { status: 'completed' } })
+      .mockResolvedValue({ data: imagesWithUpload })
+
+    render(<StoryboardPreview {...makeProps()} />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('generate-storyboard-btn'))
+    })
+    await flush()
+    act(() => { vi.advanceTimersByTime(2500) })
+    await flush()
+    await flush()
+    await flush()
+
+    expect(screen.getByTestId('stage-storyboard-ready')).toBeInTheDocument()
+
+    // Scene 0 has 2 versions — version picker is visible
+    // v2 is uploaded: should have the upload badge
+    const badge = screen.getByTestId('upload-badge-0-2')
+    expect(badge).toBeInTheDocument()
+    expect(badge.textContent).toBe('↑')
+
+    // v1 is generated: no badge
+    expect(screen.queryByTestId('upload-badge-0-1')).not.toBeInTheDocument()
+
+    // v2 title should say "Uploaded at" not "Seed:"
+    const v2btn = screen.getByTestId('version-btn-0-2')
+    expect(v2btn.getAttribute('title')).toContain('Uploaded at')
+    expect(v2btn.getAttribute('title')).not.toContain('Seed:')
+  })
+})

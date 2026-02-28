@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 
@@ -90,9 +90,10 @@ class StoryboardApproveRequest(BaseModel):
 class VersionEntryResponse(BaseModel):
     version: int
     url: str                                    # e.g. /api/video/storyboard/{id}/img/scene_0/v1.png
-    seed: int
+    seed: Optional[int]                         # None for uploaded images
     timestamp: str
     lora_weights: Dict[str, float] = {}        # weights used when generating this version
+    source: str = "generated"                  # "generated" | "upload"
 
 
 class StoryboardSceneResponse(BaseModel):
@@ -113,6 +114,31 @@ class StoryboardApproveResponse(BaseModel):
     storyboard_id: str
     # scene_idx (str) → absolute path on disk — passed to GenerateRequest.user_overrides
     approved_paths: Dict[str, str]
+
+
+class SnapshotResponse(BaseModel):
+    snapshot_id: str
+    scene_count: int
+
+
+class SnapshotListEntry(BaseModel):
+    snapshot_id: str
+    timestamp: str
+    scene_count: int
+
+
+class SnapshotListResponse(BaseModel):
+    snapshots: List[SnapshotListEntry]
+
+
+class RestoreSnapshotResponse(BaseModel):
+    restored_from: str
+    backup_snapshot_id: str
+
+
+class UploadResponse(BaseModel):
+    uploaded: int
+    snapshot_id: str
 
 
 # ── Background workers ─────────────────────────────────────────────────────────
@@ -220,6 +246,7 @@ async def get_storyboard_images(storyboard_id: str) -> StoryboardImagesResponse:
                 seed=v.seed,
                 timestamp=v.timestamp,
                 lora_weights=v.lora_weights,
+                source=v.source,
             )
             for v in scene.versions
         ]
@@ -299,6 +326,75 @@ async def approve_storyboard(
         storyboard_id=storyboard_id,
         approved_paths={str(k): v for k, v in approved_paths.items()},
     )
+
+
+@router.post("/{storyboard_id}/snapshot", status_code=status.HTTP_201_CREATED)
+async def create_snapshot(storyboard_id: str) -> SnapshotResponse:
+    """Create a snapshot of the current storyboard state.
+
+    Copies the latest image for each scene + state.json into a timestamped
+    snapshot directory. Snapshots survive regeneration and upload operations
+    and can be restored later.
+    """
+    svc = _get_service()
+    try:
+        result = svc.create_snapshot(storyboard_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return SnapshotResponse(**result)
+
+
+@router.get("/{storyboard_id}/snapshots")
+async def list_snapshots(storyboard_id: str) -> SnapshotListResponse:
+    """List all snapshots for a storyboard, newest first."""
+    svc = _get_service()
+    try:
+        snapshots = svc.list_snapshots(storyboard_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return SnapshotListResponse(snapshots=[SnapshotListEntry(**s) for s in snapshots])
+
+
+@router.post("/{storyboard_id}/snapshots/{snapshot_id}/restore")
+async def restore_snapshot(
+    storyboard_id: str,
+    snapshot_id: str,
+) -> RestoreSnapshotResponse:
+    """Restore a snapshot by adding its images as new versions (non-destructive).
+
+    Creates a backup snapshot first so the restore is itself reversible.
+    """
+    svc = _get_service()
+    try:
+        result = svc.restore_snapshot(storyboard_id, snapshot_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RestoreSnapshotResponse(**result)
+
+
+@router.post("/{storyboard_id}/upload")
+async def upload_storyboard_zip(
+    storyboard_id: str,
+    file: UploadFile = File(...),
+) -> UploadResponse:
+    """Upload a curated ZIP of storyboard images.
+
+    The ZIP must contain ``scene_01.png`` through ``scene_NN.png`` (1-indexed,
+    matching the storyboard scene count). Each file must be a valid PNG.
+
+    A snapshot is automatically created before applying the upload so the
+    previous state can be restored. Each uploaded image is added as a new
+    version with ``source="upload"`` and ``seed=null``.
+    """
+    svc = _get_service()
+    content = await file.read()
+    try:
+        result = svc.upload_zip(storyboard_id, content)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return UploadResponse(**result)
 
 
 @router.get("/{storyboard_id}/download")

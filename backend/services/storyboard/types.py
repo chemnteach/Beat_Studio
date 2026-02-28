@@ -18,9 +18,10 @@ class VersionEntry:
     """One generated keyframe image for a scene."""
     version: int           # 1-indexed; v1 is the first generated image
     filename: str          # e.g. "v1.png" — relative to scene dir
-    seed: int
+    seed: Optional[int]    # None for uploaded images
     timestamp: str         # ISO-8601
     lora_weights: Dict[str, float] = field(default_factory=dict)  # weights used for this version
+    source: str = "generated"  # "generated" | "upload"
 
 
 @dataclass

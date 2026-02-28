@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -22,6 +24,7 @@ class StoryboardStateStore:
 
     Each session lives under ``{base_dir}/{storyboard_id}/state.json``.
     Images live under ``{base_dir}/{storyboard_id}/scene_{idx}/v{n}.png``.
+    Snapshots live under ``{base_dir}/{storyboard_id}/snapshots/{timestamp}/``.
     """
 
     def __init__(self, base_dir: Optional[Path] = None) -> None:
@@ -123,6 +126,59 @@ class StoryboardStateStore:
             d.mkdir(parents=True, exist_ok=True)
         return d
 
+    # ── snapshots ─────────────────────────────────────────────────────────────
+
+    def snapshot_dir(self, storyboard_id: str, snapshot_id: str) -> Path:
+        """Return the directory for a specific snapshot."""
+        return self._base / storyboard_id / "snapshots" / snapshot_id
+
+    def create_snapshot(self, storyboard_id: str) -> Dict:
+        """Copy the latest image for each scene + state.json into a timestamped snapshot dir.
+
+        Returns:
+            ``{"snapshot_id": "<timestamp>", "scene_count": <n>}``
+        """
+        state = self._require(storyboard_id)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        snap_dir = self.snapshot_dir(storyboard_id, ts)
+        snap_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy state.json
+        shutil.copy2(self._state_path(storyboard_id), snap_dir / "state.json")
+
+        count = 0
+        for scene in state.scenes:
+            if not scene.versions:
+                continue
+            latest = scene.versions[-1]
+            src = self.scene_dir(storyboard_id, scene.scene_idx) / latest.filename
+            if src.exists():
+                shutil.copy2(src, snap_dir / f"scene_{scene.scene_idx:02d}.png")
+                count += 1
+
+        logger.debug("Created snapshot %s for storyboard %s (%d scenes)", ts, storyboard_id, count)
+        return {"snapshot_id": ts, "scene_count": count}
+
+    def list_snapshots(self, storyboard_id: str) -> List[Dict]:
+        """List all snapshots for *storyboard_id*, newest first.
+
+        Returns:
+            List of ``{"snapshot_id": str, "timestamp": str, "scene_count": int}``
+        """
+        snaps_root = self._base / storyboard_id / "snapshots"
+        if not snaps_root.exists():
+            return []
+        result = []
+        for snap_dir in sorted(snaps_root.iterdir(), reverse=True):
+            if snap_dir.is_dir():
+                scene_count = len(list(snap_dir.glob("scene_*.png")))
+                result.append({
+                    "snapshot_id": snap_dir.name,
+                    "timestamp": snap_dir.name,
+                    "scene_count": scene_count,
+                })
+        return result
+
     # ── internal ──────────────────────────────────────────────────────────────
 
     def _state_path(self, storyboard_id: str) -> Path:
@@ -167,6 +223,7 @@ class StoryboardStateStore:
                             "seed": v.seed,
                             "timestamp": v.timestamp,
                             "lora_weights": v.lora_weights,
+                            "source": v.source,
                         }
                         for v in s.versions
                     ],
@@ -188,9 +245,10 @@ class StoryboardStateStore:
                     VersionEntry(
                         version=v["version"],
                         filename=v["filename"],
-                        seed=v["seed"],
+                        seed=v.get("seed"),
                         timestamp=v["timestamp"],
                         lora_weights=v.get("lora_weights", {}),
+                        source=v.get("source", "generated"),
                     )
                     for v in s.get("versions", [])
                 ],
