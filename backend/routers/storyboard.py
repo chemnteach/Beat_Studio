@@ -301,6 +301,44 @@ async def approve_storyboard(
     )
 
 
+@router.get("/{storyboard_id}/download")
+async def download_storyboard_zip(storyboard_id: str):
+    """Download all approved (or latest) keyframe images as a ZIP.
+
+    Files inside the ZIP are named ``scene_01.png``, ``scene_02.png``, …
+    If a scene has an approved version that file is used; otherwise the
+    most recently generated version is used.
+    """
+    import io
+    import zipfile
+    from fastapi.responses import StreamingResponse
+
+    svc = _get_service()
+    state = svc.get_state(storyboard_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Storyboard '{storyboard_id}' not found")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for scene in sorted(state.scenes, key=lambda s: s.scene_idx):
+            if not scene.versions:
+                continue
+            # Prefer approved version, fall back to latest
+            target_version = scene.approved_version or scene.versions[-1].version
+            entry = next((v for v in scene.versions if v.version == target_version), scene.versions[-1])
+            img_path = _STORYBOARD_BASE / storyboard_id / f"scene_{scene.scene_idx}" / entry.filename
+            if img_path.exists():
+                arcname = f"scene_{scene.scene_idx + 1:02d}.png"
+                zf.write(img_path, arcname)
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=storyboard_{storyboard_id[:8]}.zip"},
+    )
+
+
 @router.get("/{storyboard_id}/img/{scene_dir}/{filename}")
 async def serve_keyframe_image(
     storyboard_id: str,

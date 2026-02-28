@@ -652,6 +652,18 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
 
       <div className="stage-nav">
         <button onClick={onBack}>← Back to LoRA</button>
+        <a
+          href={`/api/video/storyboard/${storyboardId}/download`}
+          download
+          data-testid="download-storyboard-btn"
+          style={{
+            padding: '8px 18px', borderRadius: '6px', background: '#0f3460',
+            color: '#e0e0e0', fontSize: '0.9rem', textDecoration: 'none',
+            display: 'inline-flex', alignItems: 'center', gap: '6px',
+          }}
+        >
+          ↓ Download ZIP
+        </a>
         <button
           onClick={() => void handleApprove()}
           disabled={isApproving}
