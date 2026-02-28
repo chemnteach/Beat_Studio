@@ -426,12 +426,21 @@ export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
             )}
             <button
               onClick={async () => {
-                // Auto-select LoRAs whose trigger token appears in any scene prompt
+                // Auto-select LoRAs whose trigger token OR descriptive tags appear in any scene prompt.
+                // Trigger tokens cover character LoRAs (e.g. rob_char written into prompts).
+                // Tag matching covers scene LoRAs (e.g. beach_bar_ext whose token is never
+                // in natural language but tags like "beach", "bar" will be).
                 try {
-                  const { data } = await axios.get<{ loras: { name: string; trigger_token: string }[] }>('/api/lora/list');
+                  const { data } = await axios.get<{ loras: { name: string; trigger_token: string; tags: string[] }[] }>('/api/lora/list');
                   const allPromptText = editedPrompts.map(p => p.positive).join(' ').toLowerCase();
+                  // Tags that are too generic to be meaningful for matching
+                  const skipTags = new Set(['scene', 'style', 'character', 'identity', 'local', 'dj']);
                   const autoSelected = data.loras
-                    .filter(l => l.trigger_token && allPromptText.includes(l.trigger_token.toLowerCase()))
+                    .filter(l => {
+                      if (l.trigger_token && allPromptText.includes(l.trigger_token.toLowerCase())) return true;
+                      const descriptiveTags = (l.tags ?? []).filter(t => !skipTags.has(t.toLowerCase()));
+                      return descriptiveTags.some(t => allPromptText.includes(t.toLowerCase()));
+                    })
                     .map(l => l.name);
                   if (autoSelected.length > 0) setSelectedLoraNames(autoSelected);
                 } catch { /* non-fatal — proceed without pre-selection */ }
