@@ -93,3 +93,4 @@ class ComposedPrompt:
     nsfw: bool
     base_checkpoint: str = "emilianJR/epiCRealism"  # HuggingFace base model ID
     lora_configs: List[LoRAConfig] = field(default_factory=list)
+    init_image_path: str = ""  # Path to conditioning image (used by I2V backends e.g. FramePack)

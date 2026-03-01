@@ -153,6 +153,31 @@ models:
     vram_gb: 7.5
     install_cmd: null
 
+  # ── FramePack (image-to-video) ────────────────────────────────────────────
+  - name: framepack_f1_transformer
+    display_name: "FramePack F1 Transformer"
+    purpose: "FramePack I2V backbone — animates storyboard keyframes into video"
+    status: recommended
+    source: huggingface
+    repo_id: "lllyasviel/FramePack_F1_I2V_HY_20250503"
+    cache_subdir: "models--lllyasviel--FramePack_F1_I2V_HY_20250503"
+    size_gb: 25.7
+    vram_gb: 10.0
+    install_cmd: null
+    note: "Requires ~30 GB system RAM (cpu_offload). fp8 via torchao reduces VRAM to ~8 GB."
+
+  - name: framepack_hunyuan_base
+    display_name: "HunyuanVideo Base (FramePack)"
+    purpose: "Text encoders, VAE, scheduler required by FramePack pipeline"
+    status: recommended
+    source: huggingface
+    repo_id: "hunyuanvideo-community/HunyuanVideo"
+    cache_subdir: "models--hunyuanvideo-community--HunyuanVideo"
+    size_gb: 4.7
+    vram_gb: 0.0
+    install_cmd: null
+    note: "Shared base components (Llama encoder, CLIP, VAE). 0 extra VRAM — cpu_offloaded."
+
   # ── WAN 2.6 (local) ───────────────────────────────────────────────────────
   - name: wan26_local
     display_name: "WAN 2.6 (local)"
