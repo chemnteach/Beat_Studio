@@ -1,0 +1,78 @@
+---
+session: Beat_Studio
+date: 2026-03-01
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Build RunPod cloud video backend with 5-model comparison + fix approved storyboard paths
+now: Craig sets up RunPod account, downloads models, deploys worker, runs comparison script
+test: python -m pytest backend/tests/unit/test_video_engine.py::TestGenerateRequestFields -v && npm test -- --run src/components/VideoStudio.test.tsx
+
+done_this_session:
+  - task: Investigated FramePack RAM — desktop (15 GB) ruled out, needs 30+ GB
+    files: []
+  - task: Built RunPod serverless worker with 5 model handlers and VRAM caching
+    files: [runpod_worker/src/handler.py, runpod_worker/src/models.py, runpod_worker/Dockerfile, runpod_worker/requirements.txt, runpod_worker/test_input.json]
+  - task: Built RunPodBackend as proper VideoBackend subclass (polls job, saves MP4)
+    files: [backend/services/video/backends/runpod_client.py]
+  - task: Built 15-clip comparison script (3 scenes × 5 models, saves output/comparison/)
+    files: [scripts/runpod_compare.py]
+  - task: Fixed assembler duration bug — loops short clips, trims long via scene_durations param
+    files: [backend/services/video/assembler.py]
+  - task: TDD — fixed onApprove discarding approvedPaths in VideoStudio (6 backend + 3 frontend tests)
+    files: [backend/routers/video.py, frontend/src/components/VideoStudio.tsx, backend/tests/unit/test_video_engine.py, frontend/src/components/VideoStudio.test.tsx]
+
+blockers: []
+
+questions:
+  - skyreels_v2_i2v and skyreels_v3_r2v pipeline classes need verification from model cards before first deploy
+  - Does Craig's laptop have 32+ GB RAM? (needed for FramePack local — unconfirmed)
+
+decisions:
+  - runpod_hf_home_on_volume: Dockerfile sets HF_HOME=/runpod-volume/hf_cache so weights persist across pod restarts
+  - runpod_one_model_at_a_time: Worker frees current model before loading next (kill-and-revive, same pattern as local)
+  - approved_paths_as_ordered_list: Frontend sorts Record<string,string> by scene index before sending as list to backend
+  - scene_durations_optional: Added to assembler as backward-compatible optional param — router not yet passing it (Phase 3 TODO)
+
+findings:
+  - FramePack needs 30+ GB system RAM regardless of VRAM — the transformer (25.7 GB) lives in CPU RAM
+  - SkyReels-V2 DF has clean diffusers support (SkyReelsV2DiffusionForcingPipeline); I2V and V3 R2V are less certain
+  - WanImageToVideoPipeline is the likely class for SkyReels-V2 I2V and Wan 2.2 — needs verification
+
+worked:
+  - TDD flow: write tests → confirm red → implement → confirm green → full suite
+  - VideoBackend subclass pattern: RunPodBackend fits cleanly into existing ModelRouter architecture
+  - HF_HOME env var approach: all model caching unified to network volume without path management
+
+failed: []
+
+next:
+  - Craig: Create RunPod account, add $25 credits, get API key + endpoint ID
+  - Craig: Create 200 GB network volume (beat-studio-models)
+  - Craig: Spin up temp A100 80GB pod, run model downloads (include hunyuanvideo-community/HunyuanVideo and lllyasviel/flux_redux_bfl for FramePack)
+  - Craig: Deploy serverless endpoint via GitHub or Docker Hub
+  - Craig: Run python scripts/runpod_compare.py --storyboard-zip path/to/approved.zip
+  - Craig: Review 15 clips, pick winner
+  - Claude: Wire winner as default backend, delete losers, update Dockerfile to single model
+  - Claude: Wire scene_durations into router call (assembler already has the param)
+  - Claude: Investigate watercolor_inconsistent (_current_checkpoint caching across clips)
+  - Claude: Wire SceneEditor prompt edits through user_overrides
+
+files:
+  created:
+    - runpod_worker/src/handler.py
+    - runpod_worker/src/models.py
+    - runpod_worker/Dockerfile
+    - runpod_worker/requirements.txt
+    - runpod_worker/test_input.json
+    - backend/services/video/backends/runpod_client.py
+    - scripts/runpod_compare.py
+    - frontend/src/components/VideoStudio.test.tsx
+    - thoughts/shared/handoffs/Beat_Studio/2026-03-01_05-04_runpod-cloud-backend.yaml
+  modified:
+    - backend/routers/video.py
+    - backend/services/video/assembler.py
+    - backend/tests/unit/test_video_engine.py
+    - frontend/src/components/VideoStudio.tsx
+    - thoughts/ledgers/CONTINUITY_CLAUDE-beat-studio.md

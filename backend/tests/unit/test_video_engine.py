@@ -387,3 +387,52 @@ class TestCostEstimator:
         cost_5 = est.estimate_total(backend, num_scenes=5, resolution=(1920, 1080))
         cost_10 = est.estimate_total(backend, num_scenes=10, resolution=(1920, 1080))
         assert cost_10 > cost_5
+
+
+# ── GenerateRequest new fields ─────────────────────────────────────────────────
+
+class TestGenerateRequestFields:
+    """GenerateRequest must accept and default the new cloud routing fields."""
+
+    def test_defaults_backend_local(self):
+        from backend.routers.video import GenerateRequest
+        req = GenerateRequest(plan_id="p", audio_id="a")
+        assert req.backend == "local"
+
+    def test_defaults_runpod_model_none(self):
+        from backend.routers.video import GenerateRequest
+        req = GenerateRequest(plan_id="p", audio_id="a")
+        assert req.runpod_model is None
+
+    def test_defaults_approved_image_paths_empty(self):
+        from backend.routers.video import GenerateRequest
+        req = GenerateRequest(plan_id="p", audio_id="a")
+        assert req.approved_image_paths == []
+
+    def test_accepts_runpod_backend(self):
+        from backend.routers.video import GenerateRequest
+        req = GenerateRequest(
+            plan_id="p", audio_id="a",
+            backend="runpod",
+            runpod_model="skyreels_v2_df",
+        )
+        assert req.backend == "runpod"
+        assert req.runpod_model == "skyreels_v2_df"
+
+    def test_accepts_approved_image_paths(self):
+        from backend.routers.video import GenerateRequest
+        paths = ["/storyboard/scene_01.png", "/storyboard/scene_02.png"]
+        req = GenerateRequest(plan_id="p", audio_id="a", approved_image_paths=paths)
+        assert req.approved_image_paths == paths
+
+    def test_accepts_all_new_fields_together(self):
+        from backend.routers.video import GenerateRequest
+        req = GenerateRequest(
+            plan_id="p", audio_id="a",
+            backend="runpod",
+            runpod_model="framepack",
+            approved_image_paths=["/sb/scene_01.png"],
+        )
+        assert req.backend == "runpod"
+        assert req.runpod_model == "framepack"
+        assert req.approved_image_paths == ["/sb/scene_01.png"]

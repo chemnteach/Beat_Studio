@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from backend.services.video.transition_engine import TransitionConfig
 from backend.services.video.types import VideoClip
@@ -41,6 +41,7 @@ class VideoAssembler:
         output_path: str,
         resolution: Tuple[int, int] = (1920, 1080),
         fps: int = 24,
+        scene_durations: Optional[List[float]] = None,
     ) -> str:
         """Assemble clips into a final video with audio.
 
@@ -59,6 +60,10 @@ class VideoAssembler:
             output_path: Destination path for the final video.
             resolution: Target output resolution ``(width, height)``.
             fps: Target frames per second.
+            scene_durations: Intended duration for each clip in seconds.
+                If provided, clips shorter than their intended duration are
+                looped and trimmed, and clips longer are trimmed.  If omitted,
+                each clip's own ``duration_sec`` is used as-is.
 
         Returns:
             Path to the assembled video file (same as ``output_path``).
@@ -88,6 +93,7 @@ class VideoAssembler:
             output_path=output_path,
             resolution=resolution,
             fps=fps,
+            scene_durations=scene_durations,
         )
         return result
 
@@ -101,6 +107,7 @@ class VideoAssembler:
         output_path: str,
         resolution: Tuple[int, int],
         fps: int,
+        scene_durations: Optional[List[float]] = None,
     ) -> str:
         """Run FFmpeg concat + audio mux.
 
@@ -117,14 +124,56 @@ class VideoAssembler:
         out_path = Path(output_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Normalize clip durations to intended scene durations.
+        # - Clip too short (>0.5s gap): loop and trim with ffmpeg, then use temp file.
+        # - Clip too long: concat `duration` directive trims it.
+        # - Close enough (<= 0.5s gap): use `duration` directive to trim/hold last frame.
+        intended = scene_durations or [c.duration_sec for c in clips]
+        normalized_paths: List[tuple[str, float]] = []
+        temp_files: List[Path] = []
+
+        for clip, target_dur in zip(clips, intended):
+            clip_path = Path(clip.file_path).resolve()
+            gap = target_dur - clip.duration_sec
+
+            if gap > 0.5:
+                # Clip is significantly shorter — loop it to cover the full duration
+                looped = out_path.parent / f"looped_{uuid.uuid4().hex[:8]}.mp4"
+                temp_files.append(looped)
+                loop_cmd = [
+                    "ffmpeg", "-y",
+                    "-stream_loop", "-1",
+                    "-i", str(clip_path),
+                    "-t", str(target_dur),
+                    "-c", "copy",
+                    str(looped),
+                ]
+                try:
+                    subprocess.run(loop_cmd, check=True, capture_output=True)
+                    normalized_paths.append((str(looped), target_dur))
+                    logger.debug(
+                        "Looped short clip %.2fs → %.2fs: %s",
+                        clip.duration_sec, target_dur, clip.file_path,
+                    )
+                except subprocess.CalledProcessError as exc:
+                    stderr = exc.stderr.decode(errors="replace").strip()
+                    logger.warning(
+                        "Failed to loop clip %s (%.2f→%.2f): %s — using original",
+                        clip.file_path, clip.duration_sec, target_dur, stderr[-200:],
+                    )
+                    normalized_paths.append((str(clip_path), target_dur))
+            else:
+                # Trim or minor hold: concat duration directive handles it
+                normalized_paths.append((str(clip_path), target_dur))
+
         # Write concat list — unique filename prevents concurrent-job collisions.
         # MUST use absolute paths: ffmpeg resolves relative paths in concat.txt
         # relative to the concat file's directory, not the process CWD.
         concat_file = out_path.parent / f"concat_{uuid.uuid4().hex[:8]}.txt"
         concat_file.write_text(
             "".join(
-                f"file '{Path(c.file_path).resolve()}'\nduration {c.duration_sec}\n"
-                for c in clips
+                f"file '{path}'\nduration {dur}\n"
+                for path, dur in normalized_paths
             )
         )
 
@@ -153,6 +202,8 @@ class VideoAssembler:
             raise RuntimeError(f"FFmpeg assembly failed (exit {exc.returncode}): {stderr[-500:]}") from exc
         finally:
             concat_file.unlink(missing_ok=True)
+            for tmp in temp_files:
+                tmp.unlink(missing_ok=True)
 
         logger.info("Assembled %d clips → %s", len(clips), output_path)
         return output_path

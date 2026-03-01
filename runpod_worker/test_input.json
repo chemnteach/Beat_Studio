@@ -1,0 +1,12 @@
+{
+  "input": {
+    "model": "skyreels_v2_df",
+    "image": "<base64 of scene_03.png — replace before running>",
+    "prompt": "gentle ocean waves rolling onto golden shore, warm sunset light slowly shifting across wet sand, palm tree shadow drifting",
+    "duration_sec": 5.0,
+    "resolution": [720, 480],
+    "seed": 42,
+    "negative_prompt": "blurry, low quality, distorted, deformed",
+    "ref_images": []
+  }
+}

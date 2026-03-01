@@ -86,6 +86,7 @@ export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
   const [sceneIndices, setSceneIndices] = useState<number[] | undefined>(undefined);
   const [selectedLoraNames, setSelectedLoraNames] = useState<string[]>([]);
   const [storyboardId, setStoryboardId] = useState<string | null>(null);
+  const [approvedImagePaths, setApprovedImagePaths] = useState<Record<string, string>>({});
 
   const songTitle = analysis?.title;
 
@@ -161,6 +162,11 @@ export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
           user_overrides[String(p.scene_index)] = p.positive.trim();
         }
       }
+      // Convert approved paths map (scene_index → path) to ordered list
+      const approved_image_paths = Object.keys(approvedImagePaths)
+        .sort((a, b) => parseInt(a) - parseInt(b))
+        .map(k => approvedImagePaths[k]);
+
       const body: Record<string, unknown> = {
         plan_id: planId,
         audio_id: audioId,
@@ -169,6 +175,8 @@ export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
         creative_direction: creativeDirection,
         user_overrides,
         lora_names: selectedLoraNames,
+        backend: 'local',
+        approved_image_paths,
       };
       if (indices && indices.length > 0) body.scene_indices = indices;
       const { data } = await axios.post<{ task_id: string }>('/api/video/generate', body);
@@ -485,8 +493,9 @@ export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
               positive_prompt: p.positive,
             }))}
             loraNames={selectedLoraNames}
-            onApprove={(sbId, _approvedPaths) => {
+            onApprove={(sbId, approvedPaths) => {
               setStoryboardId(sbId);
+              setApprovedImagePaths(approvedPaths);
               void fetchPlan();
             }}
             onBack={() => setStage('lora')}

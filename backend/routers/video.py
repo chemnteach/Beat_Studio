@@ -400,6 +400,9 @@ class GenerateRequest(BaseModel):
     scene_indices: Optional[List[int]] = None  # If set, generate only these scene indices (test run)
     user_overrides: Dict[str, str] = {}  # scene_index (as string) → reviewed positive prompt
     lora_names: List[str] = []           # LoRA names to activate; empty = no LoRAs loaded
+    backend: str = "local"               # "local" | "runpod"
+    runpod_model: Optional[str] = None   # model name when backend="runpod"
+    approved_image_paths: List[str] = [] # ordered storyboard keyframe paths (index 0 = scene 0)
 
 
 class SceneEditRequest(BaseModel):

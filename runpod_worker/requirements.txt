@@ -1,0 +1,11 @@
+runpod
+diffusers>=0.37.0
+transformers>=4.46.0
+accelerate
+safetensors
+sentencepiece
+einops
+imageio[ffmpeg]
+Pillow
+torch
+torchvision
