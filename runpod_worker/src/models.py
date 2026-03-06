@@ -31,14 +31,15 @@ logger = logging.getLogger("beat_studio.worker.models")
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-_FRAMEPACK_TRANSFORMER = "lllyasviel/FramePackI2V_HY"
-_FRAMEPACK_BASE        = "hunyuanvideo-community/HunyuanVideo"
-_FRAMEPACK_SIGLIP      = "lllyasviel/flux_redux_bfl"
-
-_SKYREELS_V2_I2V = "Skywork/SkyReels-V2-I2V-14B-720P"
-_SKYREELS_V2_DF  = "Skywork/SkyReels-V2-DF-14B-720P-Diffusers"
-_WAN22_I2V       = "Wan-AI/Wan2.2-I2V-14B-720P"
-_SKYREELS_V3_R2V = "Skywork/SkyReels-V3-R2V-14B"
+_MODELS_ROOT     = Path("/workspace/models")
+_FRAMEPACK_TRANSFORMER = str(_MODELS_ROOT / "FramePackI2V_HY")
+_FRAMEPACK_BASE        = "hunyuanvideo-community/HunyuanVideo"  # no local copy, keep HF
+_FRAMEPACK_SIGLIP      = "lllyasviel/flux_redux_bfl"            # no local copy, keep HF
+_SKYREELS_V2_I2V = str(_MODELS_ROOT / "SkyReels-V2-I2V-14B-720P")
+_SKYREELS_V2_DF  = str(_MODELS_ROOT / "SkyReels-V2-DF-14B-720P-Diffusers")
+_WAN22_I2V       = str(_MODELS_ROOT / "Wan2.2-I2V-A14B")        # fixed: was wrong ID
+_SKYREELS_V3_R2V = str(_MODELS_ROOT / "SkyReels-V3-R2V-14B")
+_SKYREELS_V3_SCRIPT = str(_MODELS_ROOT / "SkyReels-V3-R2V-14B" / "generate_video.py")
 
 SUPPORTED_MODELS = {
     "framepack",
@@ -167,21 +168,20 @@ def _load_wan22_i2v():
     return pipe
 
 
-def _load_skyreels_v3_r2v():
-    # SkyReels-V3 R2V uses a reference-to-video architecture.
-    # Verify the pipeline class at:
-    #   https://huggingface.co/Skywork/SkyReels-V3-R2V-14B
-    # If a diffusers pipeline is not available, the repo's generate_video.py
-    # can be adapted or called via subprocess.
-    from diffusers import WanImageToVideoPipeline  # placeholder — check model card
+def _load_skyreels_v3_r2v() -> dict:
+    """V3-R2V uses a custom inference script, not a standard diffusers pipeline.
 
-    logger.info("Loading SkyReels-V3 R2V from %s", _SKYREELS_V3_R2V)
-    pipe = WanImageToVideoPipeline.from_pretrained(
-        _SKYREELS_V3_R2V, torch_dtype=torch.bfloat16,
-    )
-    pipe.enable_model_cpu_offload()
-    pipe.vae.enable_tiling()
-    return pipe
+    Returns a sentinel dict instead of a pipeline object. Actual generation
+    is handled by _gen_skyreels_v3_r2v via subprocess.
+    """
+    script = Path(_SKYREELS_V3_SCRIPT)
+    if not script.exists():
+        raise FileNotFoundError(
+            f"SkyReels-V3 inference script not found at {script}. "
+            "Clone https://github.com/SkyworkAI/SkyReels-V3 into the model directory "
+            "or copy generate_video.py there manually."
+        )
+    return {"type": "skyreels_v3_r2v", "script": str(script), "model_id": _SKYREELS_V3_R2V}
 
 
 _LOADERS = {
@@ -300,29 +300,70 @@ def _gen_wan22_i2v(
 
 
 def _gen_skyreels_v3_r2v(
-    pipe, image: Image.Image, prompt: str, duration_sec: float,
-    resolution: tuple, seed: int, negative_prompt: str,
-    ref_images: list[Image.Image],
-) -> list[Image.Image]:
-    h, w = resolution
-    num_frames = int(duration_sec * _MODEL_FPS["skyreels_v3_r2v"])
-    generator = torch.Generator("cuda").manual_seed(seed) if seed >= 0 else None
+    pipe_info: dict,
+    image: Image.Image,
+    prompt: str,
+    duration_sec: float,
+    resolution: tuple,
+    seed: int,
+    negative_prompt: str,
+    ref_images: Optional[list] = None,
+) -> bytes:
+    """Run SkyReels-V3 R2V via its custom inference script in a subprocess."""
+    import shutil
+    import subprocess
+    import tempfile
 
-    # R2V supports multiple reference images — pass them if provided
-    # Verify the exact parameter name from the model card / repo README
-    all_refs = [image] + ref_images  # primary + additional references
-    output = pipe(
-        image=all_refs,
-        prompt=prompt,
-        negative_prompt=negative_prompt or None,
-        height=h,
-        width=w,
-        num_frames=num_frames,
-        num_inference_steps=30,
-        guidance_scale=6.0,
-        generator=generator,
-    )
-    return output.frames[0]
+    work_dir = Path(tempfile.mkdtemp(prefix="skyreels_v3_"))
+    try:
+        # Save primary (keyframe) image
+        primary_path = work_dir / "primary.png"
+        image.save(primary_path)
+
+        # Save reference images
+        ref_paths = []
+        for i, img in enumerate(ref_images or []):
+            p = work_dir / f"ref_{i}.png"
+            img.save(p)
+            ref_paths.append(str(p))
+
+        # Primary image is always first; V3 supports up to 4 total
+        all_refs = [str(primary_path)] + ref_paths
+        ref_imgs_arg = ",".join(all_refs[:4])
+
+        output_path = work_dir / "output.mp4"
+        height, width = resolution
+
+        cmd = [
+            "python3", pipe_info["script"],
+            "--task_type", "reference_to_video",
+            "--model_id", pipe_info["model_id"],
+            "--ref_imgs", ref_imgs_arg,
+            "--prompt", prompt,
+            "--duration", str(int(duration_sec)),
+            "--height", str(height),
+            "--width", str(width),
+            "--output_path", str(output_path),
+            "--offload",
+        ]
+        if seed and seed != -1:
+            cmd += ["--seed", str(seed)]
+
+        logger.info("Running SkyReels-V3 R2V: %s", " ".join(cmd))
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"SkyReels-V3 script exited {result.returncode}:\n{result.stderr}"
+            )
+
+        if not output_path.exists():
+            raise RuntimeError("SkyReels-V3 script completed but output.mp4 was not created.")
+
+        return output_path.read_bytes()
+
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 _GENERATORS = {
@@ -364,6 +405,14 @@ def load_and_generate(
     fps = _MODEL_FPS[model_name]
 
     pipe = _get_pipeline(model_name)
+
+    # V3 R2V uses subprocess-based inference, not a pipeline call
+    if model_name == "skyreels_v3_r2v":
+        return _gen_skyreels_v3_r2v(
+            pipe, image, prompt, duration_sec, resolution,
+            seed, negative_prompt, ref_pils,
+        )
+
     gen_fn = _GENERATORS[model_name]
 
     logger.info(

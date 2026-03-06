@@ -1,8 +1,8 @@
 # Continuity Ledger - Beat_Studio
 
-**Last Updated:** 2026-03-01
+**Last Updated:** 2026-03-06
 **Project:** Beat_Studio - Unified AI music video production platform
-**Current Phase:** RunPod Cloud Backend Built — Ready for Comparison Test
+**Current Phase:** RunPod Worker Fixed — Local Paths + V3 Subprocess — Ready to Deploy
 
 ---
 
@@ -55,8 +55,9 @@ Production-ready music video generation platform combining:
   - [x] Assembler duration fix: loops short clips (-stream_loop), trims long clips
   - [x] Fixed approved storyboard paths discarded in VideoStudio (TDD, 9 tests)
   - [x] GenerateRequest: added backend, runpod_model, approved_image_paths fields
-- Now: [→] Craig sets up RunPod account → downloads models → deploys worker → runs comparison
-- Next: Pick winner model, wire it as default backend, run full Island Girl video
+  - [x] RunPod worker models.py: local /workspace/models paths, Wan2.2-I2V-A14B ID fix, V3 subprocess
+- Now: [→] Craig deploys worker → runs comparison → picks winner
+- Next: Wire winner as default backend, run full Island Girl video
 
 ## Key Decisions
 
@@ -85,7 +86,7 @@ Production-ready music video generation platform combining:
 - `dreamshaper_download`: Does DreamShaper-8 download cleanly from HF on the system, or needs pre-caching?
 - `scene_editor_overrides`: SceneEditor prompt edits not yet wired back through user_overrides — only prompts-stage edits are wired.
 - `skyreels_v2_i2v_pipeline_class`: models.py uses WanImageToVideoPipeline as placeholder — verify exact class from Skywork/SkyReels-V2-I2V-14B-720P model card before deploying.
-- `skyreels_v3_r2v_pipeline`: R2V may not have a diffusers pipeline yet — check model card, may need subprocess approach.
+- `skyreels_v3_r2v_pipeline`: RESOLVED — uses subprocess via generate_video.py (clone SkyworkAI/SkyReels-V3, copy script to /workspace/models/SkyReels-V3-R2V-14B/).
 - `runpod_winner_selection`: Craig picks winning model after reviewing 15 comparison clips (scene_03, scene_11, scene_17 × 5 models). Then delete losers from network volume.
 
 ## Working Set
@@ -184,3 +185,22 @@ All trained on **SDXL Base 1.0**.
 4. Deploy serverless endpoint (GitHub or Docker Hub)
 5. Run: python scripts/runpod_compare.py --storyboard-zip path/to/approved.zip
 6. Review 15 clips, pick winner, delete losers from network volume
+
+## Session 2026-03-06: RunPod Worker — Local Paths + V3 Subprocess Fix
+
+**What was done:**
+- Fixed runpod_worker/src/models.py — 4 changes:
+  1. Constants now use `Path("/workspace/models")` for all local model dirs
+  2. Wan 2.2 repo ID corrected: `Wan2.2-I2V-A14B` (was `Wan2.2-I2V-14B-720P`)
+  3. Added `_SKYREELS_V3_SCRIPT` constant for generate_video.py path
+  4. `_load_skyreels_v3_r2v()` returns sentinel dict (script path + model_id) instead of pipeline
+  5. `_gen_skyreels_v3_r2v()` runs generate_video.py via subprocess, returns MP4 bytes directly
+  6. `load_and_generate()` early-returns for V3 before the `_GENERATORS` dispatch
+
+**Craig's next steps (unchanged):**
+1. Create RunPod account, add credits, get API key + endpoint ID
+2. Create 200 GB network volume (beat-studio-models), download 5 models
+3. For V3: clone SkyworkAI/SkyReels-V3, copy generate_video.py to /workspace/models/SkyReels-V3-R2V-14B/
+4. Deploy serverless endpoint
+5. Run: python scripts/runpod_compare.py --storyboard-zip path/to/approved.zip
+6. Review 15 clips, pick winner
