@@ -1,8 +1,8 @@
 # Continuity Ledger - Beat_Studio
 
-**Last Updated:** 2026-03-06
+**Last Updated:** 2026-03-07
 **Project:** Beat_Studio - Unified AI music video production platform
-**Current Phase:** RunPod Worker Fixed — Local Paths + V3 Subprocess — Ready to Deploy
+**Current Phase:** End-to-End RunPod Pipeline Fully Wired — Ready to Deploy & Compare
 
 ---
 
@@ -56,6 +56,7 @@ Production-ready music video generation platform combining:
   - [x] Fixed approved storyboard paths discarded in VideoStudio (TDD, 9 tests)
   - [x] GenerateRequest: added backend, runpod_model, approved_image_paths fields
   - [x] RunPod worker models.py: local /workspace/models paths, Wan2.2-I2V-A14B ID fix, V3 subprocess
+  - [x] video.py fully wired: RunPodBackend selection, init_image_path per clip, scene_durations to assembler
 - Now: [→] Craig deploys worker → runs comparison → picks winner
 - Next: Wire winner as default backend, run full Island Girl video
 
@@ -74,6 +75,8 @@ Production-ready music video generation platform combining:
 - `runpod_hf_home_on_volume`: Dockerfile sets HF_HOME=/runpod-volume/hf_cache so all model weights persist on the network volume across pod restarts.
 - `runpod_one_model_at_a_time`: Worker caches one model in VRAM at a time; requesting a different model frees the current one first (same kill-and-revive pattern as local backend).
 - `approved_paths_as_ordered_list`: Frontend converts Record<string, string> (scene_index → path) to sorted list before sending to backend, so backend indexing is positional.
+- `video_backend_local_var`: Renamed local `backend` var in _run_generate_video to `video_backend` to avoid shadowing the `backend: str` parameter.
+- `scene_durations_now_wired`: VideoAssembler.assemble() now receives scene_durations from synced_scenes so clips loop/trim to exact beat-aligned durations.
 
 ## Blockers
 
@@ -185,6 +188,18 @@ All trained on **SDXL Base 1.0**.
 4. Deploy serverless endpoint (GitHub or Docker Hub)
 5. Run: python scripts/runpod_compare.py --storyboard-zip path/to/approved.zip
 6. Review 15 clips, pick winner, delete losers from network volume
+
+## Session 2026-03-07: Video Router — Full RunPod Wiring
+
+**What was done:**
+- Wired 4 connections in backend/routers/video.py to complete end-to-end RunPod flow:
+  1. Added `backend`, `runpod_model`, `approved_image_paths` params to `_run_generate_video`
+  2. Step 3: instantiates `RunPodBackend(model_name=...)` when `backend=="runpod"`, else `ModelRouter`
+  3. Renamed local `backend` → `video_backend` throughout to avoid param shadowing
+  4. Step 9: each `ComposedPrompt` gets `init_image_path = approved_image_paths[i]`
+  5. Step 11: `VideoAssembler.assemble()` receives `scene_durations` from `synced_scenes`
+  6. Route handler forwards all three new fields to background task
+- Integration test run: 20.8 hours, 15 failed (all pre-existing stubs), 41 passed — no regressions
 
 ## Session 2026-03-06: RunPod Worker — Local Paths + V3 Subprocess Fix
 
