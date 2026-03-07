@@ -188,6 +188,9 @@ def _run_generate_video(
     scene_indices: Optional[List[int]] = None,
     user_overrides: Optional[Dict[str, str]] = None,
     lora_names: Optional[List[str]] = None,
+    backend: str = "local",
+    runpod_model: Optional[str] = None,
+    approved_image_paths: Optional[List[str]] = None,
 ) -> None:
     """Background worker: full video generation pipeline."""
     tm = _get_task_manager()
@@ -219,9 +222,13 @@ def _run_generate_video(
 
         # 3. Select video generation backend
         try:
-            backend = _get_model_router().select_backend(
-                style=style, quality=quality, local_preferred=True,
-            )
+            if backend == "runpod":
+                from backend.services.video.backends.runpod_client import RunPodBackend
+                video_backend = RunPodBackend(model_name=runpod_model or "skyreels_v3_r2v")
+            else:
+                video_backend = _get_model_router().select_backend(
+                    style=style, quality=quality, local_preferred=True,
+                )
         except Exception as exc:
             tm.fail_task(task_id, f"No video backend available: {exc}")
             return
@@ -309,7 +316,7 @@ def _run_generate_video(
                 negative=sp.negative,
                 cfg_scale=sp.cfg_scale,
                 steps=sp.steps,
-                model=backend.name(),
+                model=video_backend.name(),
                 nsfw=False,
                 base_checkpoint=animation_style.base_checkpoint,
                 lora_configs=[lora_by_name[n] for n in sp.lora_names if n in lora_by_name],
@@ -318,6 +325,7 @@ def _run_generate_video(
         ]
 
         # 9. Generate video clips
+        image_paths = approved_image_paths or []
         clips = []
         for i, (cp, scene) in enumerate(zip(composed, synced_scenes)):
             pct = 25.0 + (i / max(len(composed), 1)) * 50.0
@@ -325,7 +333,9 @@ def _run_generate_video(
                 task_id, "generating_clips", pct,
                 f"Generating clip {i + 1}/{len(composed)}…",
             )
-            clip = backend.generate_clip(cp, scene.duration_sec, resolution, fps=24, seed=i)
+            if i < len(image_paths):
+                cp.init_image_path = image_paths[i]
+            clip = video_backend.generate_clip(cp, scene.duration_sec, resolution, fps=24, seed=i)
             clip.scene_index = scene.scene_index
             clips.append(clip)
 
@@ -333,7 +343,7 @@ def _run_generate_video(
         transition_engine = TransitionEngine()
         transitions = [
             transition_engine.select_transition(
-                synced_scenes[i], synced_scenes[i + 1], backend, quality,
+                synced_scenes[i], synced_scenes[i + 1], video_backend, quality,
             )
             for i in range(len(synced_scenes) - 1)
         ]
@@ -345,11 +355,13 @@ def _run_generate_video(
         out_dir.mkdir(parents=True, exist_ok=True)
 
         assembled_path = str(out_dir / "assembled.mp4")
+        scene_durations = [s.duration_sec for s in synced_scenes]
         VideoAssembler().assemble(
             clips, transitions,
             audio_path=analysis.file_path,
             output_path=assembled_path,
             resolution=resolution,
+            scene_durations=scene_durations,
         )
 
         # 12. Encode for platform
@@ -636,6 +648,9 @@ async def generate_video(
         request.scene_indices or None,
         request.user_overrides or {},
         request.lora_names or None,
+        request.backend,
+        request.runpod_model,
+        request.approved_image_paths or [],
     )
     return {"task_id": task_id, "status": "queued", "plan_id": request.plan_id}
 
