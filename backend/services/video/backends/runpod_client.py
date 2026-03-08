@@ -160,7 +160,7 @@ class RunPodBackend(VideoBackend):
                 "resolution": list(resolution),  # [height, width]
                 "seed": seed,
                 "negative_prompt": prompt.negative or "blurry, low quality, distorted, deformed",
-                "ref_images": [],
+                "ref_images": _encode_ref_images(getattr(prompt, "ref_image_paths", []), max_refs=3),
             }
         }
 
@@ -225,6 +225,20 @@ class RunPodBackend(VideoBackend):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _encode_ref_images(paths: list, max_refs: int = 3) -> list:
+    """Base64-encode up to max_refs reference image paths that exist on disk."""
+    encoded = []
+    for p in paths:
+        if len(encoded) >= max_refs:
+            break
+        path = Path(p)
+        if path.exists():
+            encoded.append(base64.b64encode(path.read_bytes()).decode())
+        else:
+            logger.warning("ref_image_path not found, skipping: %s", p)
+    return encoded
+
 
 def _blank_png_b64() -> str:
     """Return a base64-encoded 1×1 black PNG (fallback when no init image)."""
