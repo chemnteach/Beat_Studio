@@ -19,6 +19,7 @@ from __future__ import annotations
 import gc
 import io
 import logging
+import sys
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -335,7 +336,7 @@ def _gen_skyreels_v3_r2v(
         height, width = resolution
 
         cmd = [
-            "python3", pipe_info["script"],
+            sys.executable, pipe_info["script"],
             "--task_type", "reference_to_video",
             "--model_id", pipe_info["model_id"],
             "--ref_imgs", ref_imgs_arg,

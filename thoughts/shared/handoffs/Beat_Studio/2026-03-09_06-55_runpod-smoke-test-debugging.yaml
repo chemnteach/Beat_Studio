@@ -1,0 +1,59 @@
+---
+session: Beat_Studio
+date: 2026-03-09
+status: partial
+outcome: PARTIAL_PLUS
+---
+
+goal: Get RunPod smoke test passing end-to-end with SkyReels-V3-R2V model
+now: Enable "Always Pull Latest Image" in RunPod dashboard, purge endpoint, re-run smoke test
+
+test: python scripts/test_runpod_smoke.py
+
+done_this_session:
+  - task: Created scripts/test_runpod_smoke.py smoke test with polling and base64 video output
+    files: [scripts/test_runpod_smoke.py]
+  - task: Added wget to runpod_worker/requirements.txt (needed by generate_video.py line 21)
+    files: [runpod_worker/requirements.txt]
+  - task: Fixed subprocess to use sys.executable instead of hardcoded python3
+    files: [runpod_worker/src/models.py]
+  - task: Added import sys to models.py
+    files: [runpod_worker/src/models.py]
+  - task: Rebuilt and pushed image multiple times (latest digest sha256:857c306e...)
+    files: []
+
+blockers:
+  - RunPod endpoint caches the image and doesn't re-pull :latest on warm workers
+  - Need to enable "Always Pull Latest Image" in RunPod dashboard endpoint settings
+
+questions:
+  - Does the RunPod endpoint settings UI have "Always Pull Latest Image" toggle?
+
+decisions:
+  - sys_executable_over_python3: subprocess must use sys.executable to get the same Python env where pip packages are installed
+  - wget_needed: generate_video.py imports wget at line 21 — must be in requirements.txt
+
+findings:
+  - worker_caching: RunPod caches image digest at endpoint level; purging queue alone doesn't force re-pull
+  - fast_fail_means_warm_worker: job failing in <10s means a warm worker with old image picked it up
+  - model_path_works: /runpod-volume/models/SkyReels-V3-R2V-14B/generate_video.py resolves correctly
+  - cold_start_time: fresh cold start takes ~7-8 minutes for this image
+
+worked:
+  - Model path /runpod-volume/models resolves correctly on the RunPod network volume
+  - wget installed successfully in Docker image via pip
+  - sys.executable fix is correct approach for subprocess Python env consistency
+
+failed:
+  - python3 hardcoded in subprocess — different interpreter than pip install target
+  - Purging endpoint queue without enabling "always pull" still serves warm workers with old image
+
+next:
+  - Enable "Always Pull Latest Image" in RunPod endpoint dashboard settings
+  - Purge endpoint again after enabling the setting
+  - Re-run: python scripts/test_runpod_smoke.py
+  - If smoke test passes, commit all changes and run update
+
+files:
+  created: [scripts/test_runpod_smoke.py]
+  modified: [runpod_worker/requirements.txt, runpod_worker/src/models.py]
