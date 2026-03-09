@@ -1,0 +1,44 @@
+---
+session: Beat_Studio
+date: 2026-03-09
+status: partial
+outcome: PARTIAL_PLUS
+---
+
+goal: Switch RunPod endpoint to versioned tag v2 to force image re-pull
+now: Update RunPod endpoint image from :latest to :v2, purge endpoint, run smoke test
+
+test: python scripts/test_runpod_smoke.py
+
+done_this_session:
+  - task: Built and pushed chemnteach/beat-studio-worker:v2
+    files: []
+
+blockers:
+  - User needs to update RunPod endpoint image tag from :latest to :v2 in dashboard
+  - Then purge endpoint and re-run smoke test
+
+questions: []
+
+decisions:
+  - versioned_tag: switched to :v2 to guarantee fresh image pull instead of relying on :latest caching behaviour
+
+findings:
+  - v2_digest: sha256:7f397029c646eede871f50629e7d85a3859a1d40f5927d8fb50f5e38492aab50
+  - all_layers_cached: push was instant — all layers already on Docker Hub from prior pushes
+
+worked:
+  - Versioned tags bypass RunPod image caching completely
+
+failed:
+  - :latest tag — RunPod caches image digest and warm workers never re-pull
+
+next:
+  - Update RunPod endpoint to use chemnteach/beat-studio-worker:v2
+  - Purge endpoint workers
+  - Run: python scripts/test_runpod_smoke.py
+  - If passing, commit changes and run update
+
+files:
+  created: []
+  modified: []
