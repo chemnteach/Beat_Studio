@@ -1,0 +1,52 @@
+---
+session: Beat_Studio
+date: 2026-03-09
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Build and push RunPod worker Docker image to Docker Hub
+now: Use chemnteach/beat-studio-worker:latest in RunPod template configuration
+
+test: docker pull chemnteach/beat-studio-worker:latest
+
+done_this_session:
+  - task: Docker login with existing credentials (chemnteach)
+    files: []
+  - task: Built Docker image chemnteach/beat-studio-worker:latest from runpod_worker/Dockerfile
+    files: [runpod_worker/Dockerfile, runpod_worker/requirements.txt, runpod_worker/src/]
+  - task: Fixed corrupted base image layer (short read EOF) by pruning build cache and rebuilding
+    files: []
+  - task: Pushed image to Docker Hub (two attempts due to broken pipe on large layer)
+    files: []
+
+blockers: []
+
+questions: []
+
+decisions:
+  - docker_username: chemnteach (from existing docker login credentials)
+  - base_image: runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+  - image_tag: chemnteach/beat-studio-worker:latest
+
+findings:
+  - image_digest: sha256:4cf87bed5a020ff3004adb9c92a15018e57f79fc41d080c20b533e778ce500be
+  - base_image_size: ~8GB (CUDA + PyTorch layers)
+  - key_packages: runpod-1.8.1, diffusers-0.37.0, transformers-5.3.0, accelerate-1.13.0, huggingface_hub-1.6.0, safetensors-0.7.0, imageio[ffmpeg]
+
+worked:
+  - Pruning Docker build cache (docker builder prune -f) to fix corrupted layer EOF errors
+  - Retrying docker push after broken pipe — already-uploaded layers are skipped automatically
+
+failed:
+  - First build attempt failed with "short read: expected 2646171659 bytes but got 2580099968" (network drop during large layer download)
+  - First push attempt failed with "broken pipe" on 1.37GB layer (network timeout)
+
+next:
+  - Configure RunPod serverless endpoint using chemnteach/beat-studio-worker:latest
+  - Set up network volume for HuggingFace model cache (as per Dockerfile ENV HF_HOME)
+  - Test RunPod endpoint with test_input.json
+
+files:
+  created: []
+  modified: []
