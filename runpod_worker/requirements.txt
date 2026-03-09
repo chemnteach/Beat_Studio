@@ -1,4 +1,5 @@
 runpod
+huggingface_hub
 diffusers>=0.37.0
 transformers>=4.46.0
 accelerate
