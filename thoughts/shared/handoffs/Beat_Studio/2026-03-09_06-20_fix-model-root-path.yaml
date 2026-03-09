@@ -1,0 +1,43 @@
+---
+session: Beat_Studio
+date: 2026-03-09
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Fix model root path from /workspace/models to /runpod-volume/models for RunPod serverless
+now: Configure RunPod serverless endpoint using chemnteach/beat-studio-worker:latest
+
+test: pytest backend/tests/unit/test_video_engine.py
+
+done_this_session:
+  - task: Updated _MODELS_ROOT constant in models.py to /runpod-volume/models
+    files: [runpod_worker/src/models.py]
+  - task: Verified _SKYREELS_V3_SCRIPT already resolves through _MODELS_ROOT (no separate change needed)
+    files: [runpod_worker/src/models.py]
+  - task: Ran full unit test suite — 56/56 passed, no regressions
+    files: []
+
+blockers: []
+
+questions: []
+
+decisions:
+  - model_root_path: /runpod-volume/models — RunPod serverless mounts network volumes at /runpod-volume, not /workspace
+
+findings:
+  - all_paths_derive_from_root: _FRAMEPACK_TRANSFORMER, _SKYREELS_V2_I2V, _SKYREELS_V2_DF, _WAN22_I2V, _SKYREELS_V3_R2V, _SKYREELS_V3_SCRIPT all use _MODELS_ROOT so single constant change covers everything
+
+worked:
+  - Single constant change propagates to all model paths automatically
+
+failed: []
+
+next:
+  - Configure RunPod serverless endpoint using chemnteach/beat-studio-worker:latest
+  - Set up network volume at /runpod-volume with models pre-downloaded
+  - Test endpoint with test_input.json
+
+files:
+  created: []
+  modified: [runpod_worker/src/models.py]
