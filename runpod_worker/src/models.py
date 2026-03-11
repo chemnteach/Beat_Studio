@@ -333,8 +333,18 @@ def _gen_skyreels_v3_r2v(
         all_refs = [str(primary_path)] + ref_paths
         ref_imgs_arg = ",".join(all_refs[:4])
 
-        output_path = work_dir / "output.mp4"
         height, width = resolution
+        # Script accepts --resolution {480P,540P,720P} — map from pixels
+        if height >= 720 or width >= 720:
+            res_str = "720P"
+        elif height >= 540 or width >= 540:
+            res_str = "540P"
+        else:
+            res_str = "480P"
+
+        # Script writes output to result/reference_to_video/{seed}_{timestamp}.mp4
+        # relative to cwd, so run from work_dir and glob for it afterward.
+        result_dir = work_dir / "result" / "reference_to_video"
 
         cmd = [
             sys.executable, pipe_info["script"],
@@ -343,9 +353,7 @@ def _gen_skyreels_v3_r2v(
             "--ref_imgs", ref_imgs_arg,
             "--prompt", prompt,
             "--duration", str(int(duration_sec)),
-            "--height", str(height),
-            "--width", str(width),
-            "--output_path", str(output_path),
+            "--resolution", res_str,
             "--offload",
         ]
         if seed and seed != -1:
@@ -356,17 +364,20 @@ def _gen_skyreels_v3_r2v(
         env["PYTHONPATH"] = _SKYREELS_V3_REPO
 
         logger.info("Running SkyReels-V3 R2V: %s", " ".join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=600, env=env, cwd=str(work_dir)
+        )
 
         if result.returncode != 0:
             raise RuntimeError(
                 f"SkyReels-V3 script exited {result.returncode}:\n{result.stderr}"
             )
 
-        if not output_path.exists():
-            raise RuntimeError("SkyReels-V3 script completed but output.mp4 was not created.")
+        mp4_files = sorted(result_dir.glob("*.mp4"))
+        if not mp4_files:
+            raise RuntimeError("SkyReels-V3 script completed but no output .mp4 was found.")
 
-        return output_path.read_bytes()
+        return mp4_files[-1].read_bytes()
 
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
