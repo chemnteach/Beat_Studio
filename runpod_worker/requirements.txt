@@ -7,6 +7,7 @@ safetensors
 sentencepiece
 einops
 wget
+av
 imageio[ffmpeg]
 Pillow
 torch

@@ -32,7 +32,7 @@ logger = logging.getLogger("beat_studio.worker.models")
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-_MODELS_ROOT     = Path("/runpod-volume/models")
+_MODELS_ROOT     = Path("/workspace/models")
 _FRAMEPACK_TRANSFORMER = str(_MODELS_ROOT / "FramePackI2V_HY")
 _FRAMEPACK_BASE        = "hunyuanvideo-community/HunyuanVideo"  # no local copy, keep HF
 _FRAMEPACK_SIGLIP      = "lllyasviel/flux_redux_bfl"            # no local copy, keep HF
@@ -40,7 +40,8 @@ _SKYREELS_V2_I2V = str(_MODELS_ROOT / "SkyReels-V2-I2V-14B-720P")
 _SKYREELS_V2_DF  = str(_MODELS_ROOT / "SkyReels-V2-DF-14B-720P-Diffusers")
 _WAN22_I2V       = str(_MODELS_ROOT / "Wan2.2-I2V-A14B")        # fixed: was wrong ID
 _SKYREELS_V3_R2V = str(_MODELS_ROOT / "SkyReels-V3-R2V-14B")
-_SKYREELS_V3_SCRIPT = str(_MODELS_ROOT / "SkyReels-V3-R2V-14B" / "generate_video.py")
+_SKYREELS_V3_REPO   = "/app/SkyReels-V3"
+_SKYREELS_V3_SCRIPT = f"{_SKYREELS_V3_REPO}/generate_video.py"
 
 SUPPORTED_MODELS = {
     "framepack",
@@ -350,8 +351,12 @@ def _gen_skyreels_v3_r2v(
         if seed and seed != -1:
             cmd += ["--seed", str(seed)]
 
+        import os
+        env = os.environ.copy()
+        env["PYTHONPATH"] = _SKYREELS_V3_REPO
+
         logger.info("Running SkyReels-V3 R2V: %s", " ".join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
 
         if result.returncode != 0:
             raise RuntimeError(
