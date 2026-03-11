@@ -183,9 +183,9 @@ def _load_skyreels_v3_r2v() -> dict:
             "Clone https://github.com/SkyworkAI/SkyReels-V3 into the model directory "
             "or copy generate_video.py there manually."
         )
-    # Pass the HF repo ID — the script's download_model() calls snapshot_download()
-    # which rejects local paths. It will cache to HF_HOME on the volume.
-    return {"type": "skyreels_v3_r2v", "script": str(script), "model_id": "Skywork/SkyReels-V3-R2V-14B"}
+    # Pass the local path — download_model() checks os.path.exists() first and
+    # skips snapshot_download() entirely if the directory is present on the volume.
+    return {"type": "skyreels_v3_r2v", "script": str(script), "model_id": _SKYREELS_V3_R2V}
 
 
 _LOADERS = {
