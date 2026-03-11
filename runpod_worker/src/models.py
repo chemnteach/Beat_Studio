@@ -32,7 +32,7 @@ logger = logging.getLogger("beat_studio.worker.models")
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-_MODELS_ROOT     = Path("/workspace/models")
+_MODELS_ROOT     = Path("/runpod-volume/models")
 _FRAMEPACK_TRANSFORMER = str(_MODELS_ROOT / "FramePackI2V_HY")
 _FRAMEPACK_BASE        = "hunyuanvideo-community/HunyuanVideo"  # no local copy, keep HF
 _FRAMEPACK_SIGLIP      = "lllyasviel/flux_redux_bfl"            # no local copy, keep HF
