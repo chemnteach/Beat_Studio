@@ -12,4 +12,4 @@ imageio[ffmpeg]
 Pillow
 torch
 torchvision
-torchao
+torchao==0.10.0
