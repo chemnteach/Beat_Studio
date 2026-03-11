@@ -8,6 +8,7 @@ ENV HF_HUB_CACHE=/workspace/hf_cache
 ENV HF_HUB_ENABLE_HF_TRANSFER=0
 
 COPY requirements.txt .
+RUN apt-get update && apt-get install -y ffmpeg
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Clone full SkyReels-V3 repo so skyreels_v3 package is importable
