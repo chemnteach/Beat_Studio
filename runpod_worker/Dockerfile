@@ -11,8 +11,8 @@ COPY requirements.txt .
 RUN apt-get update && apt-get install -y ffmpeg
 # Install PyTorch 2.6 first for Blackwell (sm_120) GPU support
 RUN pip install --no-cache-dir torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
-# Install remaining deps, excluding torch/torchvision to prevent downgrade
-RUN grep -vE "^(torch|torchvision|torchaudio)" requirements.txt \
+# Install remaining deps, excluding torch/torchvision/torchaudio (exact match, not torchao)
+RUN grep -vE "^(torch|torchvision|torchaudio)$" requirements.txt \
     | pip install --no-cache-dir -r /dev/stdin
 
 # Clone full SkyReels-V3 repo so skyreels_v3 package is importable
