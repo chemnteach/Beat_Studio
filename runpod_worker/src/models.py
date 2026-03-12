@@ -32,7 +32,31 @@ logger = logging.getLogger("beat_studio.worker.models")
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-_MODELS_ROOT     = Path("/runpod-volume/models")
+def _resolve_models_root() -> Path:
+    for candidate in (Path("/workspace/models"), Path("/runpod-volume/models")):
+        if candidate.exists():
+            logger.info("Models root: %s", candidate)
+            return candidate
+    # Neither exists yet (cold start before volume mount) — default to runpod-volume
+    logger.warning("Neither /workspace/models nor /runpod-volume/models exists; defaulting to /runpod-volume/models")
+    return Path("/runpod-volume/models")
+
+
+def _resolve_skyreels_v3_script() -> str:
+    # Volume copy takes priority — always up to date; Docker image copy is fallback
+    for candidate in (
+        "/runpod-volume/SkyReels-V3/generate_video.py",
+        "/workspace/SkyReels-V3/generate_video.py",
+        "/app/SkyReels-V3/generate_video.py",
+    ):
+        if Path(candidate).exists():
+            logger.info("SkyReels-V3 script: %s", candidate)
+            return candidate
+    # Default — will raise clearly at load time if missing
+    return "/app/SkyReels-V3/generate_video.py"
+
+
+_MODELS_ROOT     = _resolve_models_root()
 _FRAMEPACK_TRANSFORMER = str(_MODELS_ROOT / "FramePackI2V_HY")
 _FRAMEPACK_BASE        = "hunyuanvideo-community/HunyuanVideo"  # no local copy, keep HF
 _FRAMEPACK_SIGLIP      = "lllyasviel/flux_redux_bfl"            # no local copy, keep HF
@@ -40,8 +64,8 @@ _SKYREELS_V2_I2V = str(_MODELS_ROOT / "SkyReels-V2-I2V-14B-720P")
 _SKYREELS_V2_DF  = str(_MODELS_ROOT / "SkyReels-V2-DF-14B-720P-Diffusers")
 _WAN22_I2V       = str(_MODELS_ROOT / "Wan2.2-I2V-A14B")        # fixed: was wrong ID
 _SKYREELS_V3_R2V = str(_MODELS_ROOT / "SkyReels-V3-R2V-14B")
-_SKYREELS_V3_REPO   = "/app/SkyReels-V3"
-_SKYREELS_V3_SCRIPT = f"{_SKYREELS_V3_REPO}/generate_video.py"
+_SKYREELS_V3_SCRIPT = _resolve_skyreels_v3_script()
+_SKYREELS_V3_REPO   = str(Path(_SKYREELS_V3_SCRIPT).parent)
 
 SUPPORTED_MODELS = {
     "framepack",
@@ -170,6 +194,9 @@ def _load_wan22_i2v():
     return pipe
 
 
+_SKYREELS_V3_R2V_HF_REPO = "Skywork/SkyReels-V3-R2V-14B"
+
+
 def _load_skyreels_v3_r2v() -> dict:
     """V3-R2V uses a custom inference script, not a standard diffusers pipeline.
 
@@ -183,9 +210,13 @@ def _load_skyreels_v3_r2v() -> dict:
             "Clone https://github.com/SkyworkAI/SkyReels-V3 into the model directory "
             "or copy generate_video.py there manually."
         )
-    # Pass the local path — download_model() checks os.path.exists() first and
-    # skips snapshot_download() entirely if the directory is present on the volume.
-    return {"type": "skyreels_v3_r2v", "script": str(script), "model_id": _SKYREELS_V3_R2V}
+    # Use local volume path if it exists; otherwise pass the HF repo ID so the
+    # script can download it. download_model() does os.path.exists() first, so
+    # a valid local path short-circuits the HF download entirely.
+    local_path = Path(_SKYREELS_V3_R2V)
+    model_id = str(local_path) if local_path.exists() else _SKYREELS_V3_R2V_HF_REPO
+    logger.info("SkyReels-V3 R2V model_id: %s", model_id)
+    return {"type": "skyreels_v3_r2v", "script": str(script), "model_id": model_id}
 
 
 _LOADERS = {
@@ -367,7 +398,7 @@ def _gen_skyreels_v3_r2v(
 
         logger.info("Running SkyReels-V3 R2V: %s", " ".join(cmd))
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=600, env=env, cwd=str(work_dir)
+            cmd, capture_output=True, text=True, timeout=1800, env=env, cwd=str(work_dir)
         )
 
         if result.returncode != 0:

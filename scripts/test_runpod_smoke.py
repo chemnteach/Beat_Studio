@@ -61,9 +61,11 @@ print("Polling (cold start may take 1-3 minutes)...")
 
 # ── Poll ──────────────────────────────────────────────────────────────────────
 
-TIMEOUT    = 600
-POLL_EVERY = 5
-start      = time.time()
+TIMEOUT        = 2700  # 45 min — covers cold model load (14B from network vol) + generation
+POLL_EVERY     = 5
+MAX_UNKNOWN    = 5   # consecutive UNKNOWN responses before giving up
+start          = time.time()
+unknown_streak = 0
 
 while True:
     elapsed = time.time() - start
@@ -98,3 +100,12 @@ while True:
         error = data.get("error") or data.get("output", {}).get("error", "unknown error")
         print(f"\nFAILED: {error}")
         sys.exit(1)
+
+    elif status == "UNKNOWN":
+        unknown_streak += 1
+        if unknown_streak >= MAX_UNKNOWN:
+            print(f"\nABORTED: job {job_id} returned UNKNOWN {MAX_UNKNOWN} times — "
+                  "endpoint may have been purged mid-flight. Re-submit after workers are ready.")
+            sys.exit(1)
+    else:
+        unknown_streak = 0
