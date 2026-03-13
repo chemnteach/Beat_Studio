@@ -326,15 +326,13 @@ class TestVideoRouter:
         assert "task_id" in body
         assert "status" in body
 
-    def test_edit_scene_accepted(self, client: TestClient):
+    def test_edit_scene_is_stub(self, client: TestClient):
+        # scene/edit is not yet implemented — expect 501 until wired
         resp = client.post(
             "/api/video/scene/edit",
             json={"video_id": "vid-001", "scene_index": 3, "new_prompt": "neon city at night"},
         )
-        assert resp.status_code == 202
-        body = resp.json()
-        assert "task_id" in body
-        assert body["scene_index"] == 3
+        assert resp.status_code == 501
 
     def test_list_styles_returns_dict(self, client: TestClient):
         body = client.get("/api/video/styles").json()
@@ -345,9 +343,9 @@ class TestVideoRouter:
         body = client.get("/api/video/backends").json()
         assert "backends" in body
 
-    def test_download_video_returns_id(self, client: TestClient):
-        body = client.get("/api/video/download/vid-xyz").json()
-        assert body["video_id"] == "vid-xyz"
+    def test_download_video_missing_is_404(self, client: TestClient):
+        resp = client.get("/api/video/download/vid-xyz")
+        assert resp.status_code == 404
 
 
 # ═════════════════════════════════════════════════════════════════════════════

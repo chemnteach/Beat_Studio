@@ -38,7 +38,7 @@ _SUPPORTED_STYLES = {
 }
 _COST_PER_SCENE_USD = 0.08   # ~$0.08 per 5s scene on A100 80GB
 _POLL_INTERVAL_SEC  = 5
-_DEFAULT_TIMEOUT    = 600    # 10 min hard limit
+_DEFAULT_TIMEOUT    = 2700   # 45 min — covers cold model load (14B from network vol) + generation
 
 
 class RunPodBackend(VideoBackend):
@@ -157,7 +157,7 @@ class RunPodBackend(VideoBackend):
                 "image": image_b64,
                 "prompt": prompt.positive,
                 "duration_sec": duration_sec,
-                "resolution": list(resolution),  # [height, width]
+                "resolution": [resolution[1], resolution[0]],  # worker expects [height, width]; resolution is (width, height)
                 "seed": seed,
                 "negative_prompt": prompt.negative or "blurry, low quality, distorted, deformed",
                 "ref_images": _encode_ref_images(getattr(prompt, "ref_image_paths", []), max_refs=3),

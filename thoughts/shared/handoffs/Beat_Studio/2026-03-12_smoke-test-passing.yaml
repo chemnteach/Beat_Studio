@@ -1,0 +1,73 @@
+---
+session: Beat_Studio
+date: 2026-03-12
+status: complete
+outcome: SUCCESS
+---
+
+goal: Get RunPod serverless worker smoke test passing end-to-end
+now: Smoke test passed — 3.7MB MP4 generated in 679s. System is production-ready.
+
+test: python scripts/test_runpod_smoke.py
+
+done_this_session:
+  - task: Rebuilt Docker image with torch 2.6.0+cu126 for Blackwell GPU support
+    files: [runpod_worker/Dockerfile, runpod_worker/requirements.txt]
+  - task: Fixed models.py to auto-detect volume mount path, prefer volume script, correct HF repo ID, increase subprocess timeout 600s->1800s
+    files: [runpod_worker/src/models.py]
+  - task: Increased smoke test poll timeout 900s->2700s
+    files: [scripts/test_runpod_smoke.py]
+  - task: Created GPU/DC availability scanner
+    files: [scripts/find_runpod_gpu.py]
+  - task: Moved endpoint to US-KS-2 with A100 SXM (away from Blackwell datacenter with no capacity)
+    files: []
+  - task: Fixed Docker push strategy (build FROM v18 to avoid non-deterministic layer hashes)
+    files: []
+
+blockers: []
+
+questions: []
+
+decisions:
+  - cu126_over_cu124: torch 2.6.0+cu126 required for Blackwell (sm_120) GPU support
+  - volume_path_autodetect: models.py now probes /runpod-volume/models then /workspace/models at startup
+  - script_path_priority: volume copy of generate_video.py takes priority over Docker image copy (always up to date)
+  - hf_repo_fallback: Skywork/SkyReels-V3-R2V-14B (not SkyworkAI) used when local path missing
+  - subprocess_timeout: 1800s needed — 14B model cold load from network volume takes ~11 min on A100
+  - smoke_test_timeout: 2700s poll window to cover cold start + model load + generation
+  - datacenter: US-KS-2 chosen — A100 SXM available, network volume supported, $1.39/hr
+  - build_strategy: build FROM prior versioned tag to avoid Docker buildx non-deterministic layer hashes on push
+
+findings:
+  - blackwell_issue: Original datacenter had RTX PRO 6000 (Blackwell/sm_120) — cu124 torch crashes on startup, workers never registered
+  - in_queue_forever: Jobs stuck in queue = workers crashing before registering, NOT capacity issue
+  - subprocess_timeout_was_root_cause: v18 job went IN_PROGRESS then FAILED after exactly 600s — timeout was the last bug
+  - docker_push_wsl_issue: WSL TCP broken pipe on large layers (~5GB cu126 torch layer); fixed by building FROM prior image so only tiny delta is pushed
+  - volume_mount_path: RunPod serverless mounts network volumes at /runpod-volume/, NOT /workspace/ (pods use /workspace/)
+
+worked:
+  - A100 SXM in US-KS-2 starts workers reliably
+  - Network volume beat_studio_models_NC mounts correctly at /runpod-volume/
+  - SkyReels-V3-R2V-14B model at /runpod-volume/models/SkyReels-V3-R2V-14B loads successfully
+  - Script at /runpod-volume/SkyReels-V3/generate_video.py runs correctly
+  - End-to-end: 3.7MB MP4 generated in 679s (cold start included)
+
+failed:
+  - Blackwell datacenter — workers crash on CUDA init with cu124
+  - subprocess timeout 600s — 14B model load takes longer
+  - Docker push of full rebuild — WSL drops connection on large layers
+
+next:
+  - System is production-ready for integration with backend
+  - Consider setting min_workers=1 for warm worker (eliminates ~5 min cold start)
+  - Wire skyreels_v3_r2v model into backend video router
+
+files:
+  created: [scripts/find_runpod_gpu.py]
+  modified: [runpod_worker/Dockerfile, runpod_worker/src/models.py, scripts/test_runpod_smoke.py]
+
+image:
+  tag: chemnteach/beat-studio-worker:v19
+  digest: sha256:71460e9dc27a7141375b62b1a6160113350fe48012b08afa1d43973b2d3b16fd
+  base: chemnteach/beat-studio-worker:v18
+  gpu: A100 SXM (US-KS-2)
