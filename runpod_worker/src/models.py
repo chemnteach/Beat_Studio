@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 import imageio
+import numpy as np
 import torch
 from PIL import Image
 
@@ -33,12 +34,12 @@ logger = logging.getLogger("beat_studio.worker.models")
 # ── Constants ────────────────────────────────────────────────────────────────
 
 def _resolve_models_root() -> Path:
-    for candidate in (Path("/workspace/models"), Path("/runpod-volume/models")):
+    for candidate in (Path("/runpod-volume/models"), Path("/workspace/models")):
         if candidate.exists():
             logger.info("Models root: %s", candidate)
             return candidate
-    # Neither exists yet (cold start before volume mount) — default to runpod-volume
-    logger.warning("Neither /workspace/models nor /runpod-volume/models exists; defaulting to /runpod-volume/models")
+    # Neither exists yet (cold start before volume mount) — default to /runpod-volume
+    logger.warning("Neither /runpod-volume/models nor /workspace/models exists; defaulting to /runpod-volume/models")
     return Path("/runpod-volume/models")
 
 
@@ -180,13 +181,21 @@ def _load_skyreels_v2_df():
 
 
 def _load_wan22_i2v():
-    # Wan 2.2 I2V — verify exact pipeline class at:
-    #   https://huggingface.co/Wan-AI/Wan2.2-I2V-14B-720P
-    # WanImageToVideoPipeline is the expected class for Wan I2V diffusers models.
-    from diffusers import WanImageToVideoPipeline
+    from diffusers import AutoPipelineForImage2Video
+
+    model_dir = Path(_WAN22_I2V)
+    if not model_dir.exists():
+        raise FileNotFoundError(f"Wan 2.2 model directory not found: {model_dir}")
+    # Wan2.2-I2V-A14B ships configuration.json, not model_index.json
+    if not (model_dir / "configuration.json").exists():
+        raise FileNotFoundError(
+            f"Wan 2.2 model incomplete — no configuration.json in {model_dir}. "
+            "Re-download with: huggingface-cli download Wan-AI/Wan2.2-I2V-A14B "
+            f"--local-dir {model_dir}"
+        )
 
     logger.info("Loading Wan 2.2 I2V from %s", _WAN22_I2V)
-    pipe = WanImageToVideoPipeline.from_pretrained(
+    pipe = AutoPipelineForImage2Video.from_pretrained(
         _WAN22_I2V, torch_dtype=torch.bfloat16,
     )
     pipe.enable_model_cpu_offload()
@@ -433,7 +442,7 @@ def frames_to_mp4_bytes(frames: list[Image.Image], fps: int) -> bytes:
     with imageio.get_writer(buf, format="mp4", fps=fps, codec="libx264",
                             quality=8, macro_block_size=1) as writer:
         for frame in frames:
-            writer.append_data(frame)
+            writer.append_data(np.array(frame))
     return buf.getvalue()
 
 
