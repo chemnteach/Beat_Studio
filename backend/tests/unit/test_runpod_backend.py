@@ -14,6 +14,7 @@ from PIL import Image
 
 from backend.services.prompt.types import ComposedPrompt
 from backend.services.video.backends.runpod_client import (
+    MAX_CLIP_SEC,
     RunPodBackend,
     _blank_png_b64,
     _encode_ref_images,
@@ -207,3 +208,46 @@ def test_is_available_true_when_creds_set():
 def test_is_available_false_when_no_creds():
     b = RunPodBackend(api_key="", endpoint_id="", model_name="skyreels_v3_r2v")
     assert b.is_available() is False
+
+
+def test_max_clip_sec_is_8():
+    assert MAX_CLIP_SEC == 8.0
+
+
+def test_generate_clip_clamps_duration_over_8(tmp_path):
+    """generate_clip must clamp duration_sec to MAX_CLIP_SEC and log a warning."""
+    backend = RunPodBackend(api_key="k", endpoint_id="ep", model_name="skyreels_v3_r2v")
+    mp4_bytes = b"\x00" * 100
+
+    with patch.object(backend, "_submit_and_poll", return_value=str(tmp_path / "out.mp4")) as mock_poll, \
+         patch("builtins.open", create=True), \
+         patch("tempfile.NamedTemporaryFile") as mock_tmp:
+        mock_tmp.return_value.__enter__ = lambda s: s
+        mock_tmp.return_value.__exit__ = MagicMock(return_value=False)
+        mock_tmp.return_value.name = str(tmp_path / "out.mp4")
+
+        # _submit_and_poll returns a path; patch generate_clip at the poll level
+        with patch.object(backend, "_submit_and_poll", return_value=str(tmp_path / "out.mp4")) as mock_poll:
+            prompt = ComposedPrompt(
+                positive="a scene", negative="", cfg_scale=7.0, steps=20,
+                model="skyreels_v3_r2v", nsfw=False,
+            )
+            clip = backend.generate_clip(prompt, duration_sec=12.0, resolution=(720, 480))
+
+    # _submit_and_poll should have been called with clamped duration
+    call_args = mock_poll.call_args
+    assert call_args.args[1] == MAX_CLIP_SEC  # duration_sec clamped to 8.0
+
+
+def test_generate_clip_passes_duration_under_8(tmp_path):
+    """generate_clip must pass duration_sec unchanged when it is within the limit."""
+    backend = RunPodBackend(api_key="k", endpoint_id="ep", model_name="skyreels_v3_r2v")
+    with patch.object(backend, "_submit_and_poll", return_value=str(tmp_path / "out.mp4")) as mock_poll:
+        prompt = ComposedPrompt(
+            positive="a scene", negative="", cfg_scale=7.0, steps=20,
+            model="skyreels_v3_r2v", nsfw=False,
+        )
+        clip = backend.generate_clip(prompt, duration_sec=5.0, resolution=(720, 480))
+
+    call_args = mock_poll.call_args
+    assert call_args.args[1] == 5.0

@@ -1,0 +1,136 @@
+---
+session: Beat_Studio
+date: 2026-03-19
+status: complete
+outcome: HANDOFF
+---
+
+goal: Implement Cloudflare R2 upload in RunPod worker so clips >~4s can be returned without hitting the 10MB payload limit
+
+now: |
+  SkyReels V3 selected as production backend. Multi-clip strategy implemented in router/assembler.
+  Blocker: RunPod serverless ~10MB output payload limit breaks 7s V3 clips (~24MB base64).
+  Solution agreed: worker uploads MP4 to R2, returns URL; backend downloads from URL.
+
+context: |
+  RunPod serverless caps response payload at ~10MB. SkyReels V3 produces:
+    3s clip → ~7.6MB raw → ~10MB base64 (barely fits, worked in comparison runs)
+    7s clip → ~18MB raw → ~24MB base64 (silently dropped — COMPLETED with no output key)
+
+  The worker runs generate_video.py subprocess, reads the .mp4 file, base64-encodes it,
+  and returns it in the JSON response body. This needs to change to:
+    1. Worker generates MP4 to temp file (unchanged)
+    2. Worker uploads MP4 bytes to Cloudflare R2 using boto3 (S3-compatible)
+    3. Worker returns {"video_url": "https://...", "model": ..., "duration_sec": ..., ...}
+    4. Backend (runpod_client.py) downloads from video_url instead of base64-decoding
+    5. Worker deletes the R2 object after confirmed download (or set 1-day TTL)
+
+  All other models (FramePack, WAN 2.2) produce much smaller files and may not need R2,
+  but implement R2 for all models to be consistent and future-proof.
+
+done_this_session:
+  - task: Ran 3-model comparison — SkyReels V3 and FramePack OK, WAN 2.2 failed (missing model files)
+    notes: V3 chosen as winner. FramePack OK but V3 quality preferred.
+
+  - task: Implemented derive_video_prompt() in prompt_composer.py
+    files: [backend/services/prompt/prompt_composer.py]
+    notes: GPT-4-turbo strips image style terms and LoRA trigger tokens, adds motion language. 4 unit tests.
+
+  - task: Added video_prompt field to StoryboardScene + full stack wiring
+    files:
+      - backend/services/storyboard/types.py
+      - backend/services/storyboard/state.py
+      - backend/services/storyboard/service.py
+      - backend/routers/storyboard.py
+      - frontend/src/types/index.ts
+      - frontend/src/components/StoryboardPreview.tsx
+    notes: |
+      Auto-derived on generation (all scenes) and on single-scene regen if prompt changes.
+      PATCH /{id}/scene/{idx}/video-prompt endpoint for independent edits.
+      Side-by-side textarea editor in frontend with save/reset buttons.
+
+  - task: Multi-clip-per-scene strategy
+    files:
+      - backend/routers/video.py
+      - backend/services/video/assembler.py
+      - backend/services/video/backends/runpod_client.py
+    notes: |
+      Router: ceil(duration/8) clips per scene, each duration/num_clips sec (4-8s range).
+      Assembler: clips_per_scene param — transitions only at scene boundaries.
+      RunPodBackend: MAX_CLIP_SEC=8 clamp with warning log.
+      4 new assembler tests, 2 new RunPod tests. 617/619 passing.
+
+  - task: Discovered RunPod payload size limit; improved compare_models.py error handling
+    files: [scripts/compare_models.py]
+    notes: Missing output key now raises descriptive error. Handler errors also caught.
+
+  - task: Attempted 7s V3 clip — failed 3 times at ~1517s execution (payload too large)
+    notes: Cold start confirmed warm at delayTime=465ms. Generation itself takes ~25 min for 7s.
+
+decisions:
+  - skyreels_v3_winner: SkyReels V3 is the production video backend
+  - r2_for_large_clips: Cloudflare R2 upload in worker to bypass 10MB payload limit
+  - multi_clip_no_loop: Scenes split into equal sub-clips ≤8s, no looping, clips_per_scene tracks grouping
+
+findings:
+  - runpod_payload_limit: ~10MB max. Base64 overhead = raw_size × 1.37. Safe limit = ~7.3MB raw video.
+  - v3_generation_rate: ~3 min/sec of video at 480P on A100 (warm). 5s = ~15 min, 7s = ~25 min.
+  - wan22_never_ran: model_index.json still missing from /runpod-volume/models/Wan2.2-I2V-A14B
+
+next:
+  - step: Create Cloudflare R2 bucket + API credentials
+    who: craig
+    notes: cloudflare.com → R2 → Create bucket "beat-studio-clips". Generate API token with Object Read/Write.
+
+  - step: Add R2 upload to RunPod worker
+    who: claude
+    files: [runpod_worker/src/handler.py, runpod_worker/Dockerfile]
+    notes: |
+      In handler.py: after generating mp4_bytes, upload to R2 via boto3 S3 client.
+      Return {"video_url": presigned_url, ...} instead of {"video_b64": ..., ...}.
+      Add boto3 to Dockerfile (pip install boto3).
+      R2 creds from env: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME.
+      Set object expiry to 1 hour (presigned URL TTL).
+
+  - step: Update RunPodBackend to download from URL
+    who: claude
+    files: [backend/services/video/backends/runpod_client.py]
+    notes: |
+      Check response for "video_url" key (new path) OR "video_b64" (legacy fallback).
+      Download via httpx GET, write to temp file.
+
+  - step: Build/push Docker v23 from Windows
+    who: craig
+    notes: Same PowerShell stdin pattern as v20-v22. Tag chemnteach/beat-studio-worker:v23.
+
+  - step: Update RunPod endpoint to v23, add R2 env vars, purge
+    who: craig
+    notes: Add R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME as endpoint env vars.
+
+  - step: Re-run scene_11 7s test
+    who: craig + claude
+    command: |
+      python scripts/compare_models.py \
+        --image output/storyboard/ff630056-1dd7-4552-a983-f935a0eded24/scene_11/v1.png \
+        --prompt "Beautiful Aruban woman in flowing white linen dress with gold embroidered hem, dark wavy hair moving gently in ocean breeze, barefoot on golden sand, warm confident smile, white dress rippling in the wind, cobalt blue sky above, waves rolling onto shore, golden afternoon light shifting warmly, intimate cinematic framing, slow drift, dreamlike atmosphere" \
+        --duration 7 --resolution 480 720 --models skyreels_v3_r2v
+
+files:
+  created:
+    - thoughts/shared/handoffs/Beat_Studio/2026-03-19_r2-upload-next.yaml
+  modified:
+    - thoughts/ledgers/CONTINUITY_CLAUDE-beat-studio.md
+    - backend/services/prompt/prompt_composer.py
+    - backend/services/storyboard/types.py
+    - backend/services/storyboard/state.py
+    - backend/services/storyboard/service.py
+    - backend/routers/storyboard.py
+    - backend/routers/video.py
+    - backend/services/video/assembler.py
+    - backend/services/video/backends/runpod_client.py
+    - backend/tests/unit/test_prompt_generation.py
+    - backend/tests/unit/test_video_assembly.py
+    - backend/tests/unit/test_runpod_backend.py
+    - frontend/src/types/index.ts
+    - frontend/src/components/StoryboardPreview.tsx
+    - scripts/compare_models.py

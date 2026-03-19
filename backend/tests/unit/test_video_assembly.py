@@ -280,6 +280,61 @@ class TestVideoAssembler:
         # Verify the constant exists and is False
         assert VideoAssembler.ALLOW_KEN_BURNS is False
 
+    def test_clips_per_scene_validates_against_scenes_not_clips(self):
+        """With clips_per_scene, transitions must equal num_scenes-1, not num_clips-1."""
+        # 3 clips across 2 scenes (2+1): expect 1 transition, not 2
+        clips = [_make_clip(i) for i in range(3)]
+        transitions = [_make_transition_config()]  # 1 transition for 2 scenes
+        with patch.object(self.assembler, "_run_ffmpeg_concat", return_value="/tmp/out.mp4"):
+            result = self.assembler.assemble(
+                clips=clips,
+                transitions=transitions,
+                audio_path="/tmp/audio.wav",
+                output_path="/tmp/out.mp4",
+                clips_per_scene=[2, 1],
+            )
+        assert result is not None
+
+    def test_clips_per_scene_wrong_transition_count_raises(self):
+        """clips_per_scene=[2,1] → 2 scenes → expect 1 transition, not 2."""
+        clips = [_make_clip(i) for i in range(3)]
+        transitions = [_make_transition_config(), _make_transition_config()]  # 2 — wrong
+        with pytest.raises(ValueError, match="transition"):
+            self.assembler.assemble(
+                clips=clips,
+                transitions=transitions,
+                audio_path="/tmp/audio.wav",
+                output_path="/tmp/out.mp4",
+                clips_per_scene=[2, 1],
+            )
+
+    def test_clips_per_scene_none_falls_back_to_per_clip(self):
+        """Without clips_per_scene, validation is len(clips)-1 as before."""
+        clips = [_make_clip(i) for i in range(3)]
+        transitions = [_make_transition_config(), _make_transition_config()]
+        with patch.object(self.assembler, "_run_ffmpeg_concat", return_value="/tmp/out.mp4"):
+            result = self.assembler.assemble(
+                clips=clips,
+                transitions=transitions,
+                audio_path="/tmp/audio.wav",
+                output_path="/tmp/out.mp4",
+                clips_per_scene=None,
+            )
+        assert result is not None
+
+    def test_clips_per_scene_single_scene_many_clips_no_transitions(self):
+        """Single scene with 3 sub-clips → 0 transitions required."""
+        clips = [_make_clip(i) for i in range(3)]
+        with patch.object(self.assembler, "_run_ffmpeg_concat", return_value="/tmp/out.mp4"):
+            result = self.assembler.assemble(
+                clips=clips,
+                transitions=[],
+                audio_path="/tmp/audio.wav",
+                output_path="/tmp/out.mp4",
+                clips_per_scene=[3],
+            )
+        assert result is not None
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # VideoEncoder

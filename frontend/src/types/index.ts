@@ -180,6 +180,7 @@ export interface StoryboardSceneResult {
   scene_idx: number;
   storyboard_prompt: string;
   positive_prompt: string;
+  video_prompt: string;
   approved_version: number | null;
   versions: StoryboardVersionEntry[];
 }

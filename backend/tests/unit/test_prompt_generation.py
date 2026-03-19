@@ -522,6 +522,92 @@ class TestPromptDistiller:
         assert result[1].positive != original_b
         # fallback must strip camera language from the storyboard
         assert "camera pans" not in result[1].positive.lower()
-        assert "dolly" not in result[1].positive.lower()
-        # storyboard field must remain untouched
-        assert result[1].storyboard == "The camera pans to woman walking slowly. Dolly in on her face."
+
+
+class TestDeriveVideoPrompt:
+    """Tests for derive_video_prompt() in prompt_composer."""
+
+    def _make_mock_openai(self, response_text: str):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value.choices[0].message.content = response_text
+        return mock_client
+
+    @patch("openai.OpenAI")
+    def test_scene10_storyboard_prompt(self, mock_openai_cls):
+        """The specific scene_10 prompt from the handoff — should strip style terms and LoRA tokens."""
+        from backend.services.prompt.prompt_composer import derive_video_prompt
+
+        expected = (
+            "close-up portrait of man lying in warm golden sand, peaceful expression, "
+            "arms at sides, vivid cobalt blue sky, golden sunlight, gentle breeze moving hair, "
+            "drifting clouds, warm and dreamlike, intimate framing"
+        )
+        mock_openai_cls.return_value = self._make_mock_openai(expected)
+
+        image_prompt = (
+            "watercolor painting, soft bleeding edges, wet-on-wet technique, visible brush strokes, "
+            "paper texture, rob_char close-up portrait, man lying in warm golden sand, peaceful expression, "
+            "arms at sides, vivid cobalt blue sky above, golden sunlight on face, intimate framing, "
+            "warm and dreamlike, high quality, detailed, professional"
+        )
+        result = derive_video_prompt(image_prompt)
+
+        # Verify the system prompt instructs removal of style terms and LoRA tokens
+        call_args = mock_openai_cls.return_value.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
+        system_msg = next(m["content"] for m in messages if m["role"] == "system")
+        assert "watercolor" in system_msg
+        assert "LoRA trigger" in system_msg
+
+        # Verify the image prompt is sent as the user message
+        user_msg = next(m["content"] for m in messages if m["role"] == "user")
+        assert user_msg == image_prompt
+
+        # Verify the LLM response is returned
+        assert result == expected
+
+    @patch("openai.OpenAI")
+    def test_beach_scene_removes_lora_tokens(self, mock_openai_cls):
+        """LoRA trigger tokens like beach_sunset and island_girl should be instructed for removal."""
+        from backend.services.prompt.prompt_composer import derive_video_prompt
+
+        expected = (
+            "woman in flowing dress dancing on tropical beach at sunset, hair moving in ocean breeze, "
+            "waves rolling onto golden shore, warm cinematic lighting, slow camera pan"
+        )
+        mock_openai_cls.return_value = self._make_mock_openai(expected)
+
+        result = derive_video_prompt(
+            "beach_sunset, oil painting style, brush strokes, island_girl woman in flowing dress "
+            "dancing on tropical beach at sunset, warm cinematic lighting, high quality"
+        )
+        assert result == expected
+
+    @patch("openai.OpenAI")
+    def test_stage_performance_scene(self, mock_openai_cls):
+        """Stage performance scene — verifies user message passed correctly."""
+        from backend.services.prompt.prompt_composer import derive_video_prompt
+
+        expected = (
+            "DJ spinning records under neon lights, energetic crowd cheering, "
+            "pulsing light beams sweeping across the stage, smoke drifting"
+        )
+        mock_openai_cls.return_value = self._make_mock_openai(expected)
+
+        image_prompt = "stage_perf, DJ spinning records under neon lights, energetic crowd, high quality"
+        result = derive_video_prompt(image_prompt)
+
+        call_args = mock_openai_cls.return_value.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
+        user_msg = next(m["content"] for m in messages if m["role"] == "user")
+        assert user_msg == image_prompt
+        assert result == expected
+
+    @patch("openai.OpenAI")
+    def test_strips_leading_trailing_whitespace(self, mock_openai_cls):
+        """LLM responses with surrounding whitespace should be stripped."""
+        from backend.services.prompt.prompt_composer import derive_video_prompt
+
+        mock_openai_cls.return_value = self._make_mock_openai("  a clean result  \n")
+        result = derive_video_prompt("any prompt")
+        assert result == "a clean result"

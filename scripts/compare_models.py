@@ -127,7 +127,15 @@ def poll_job(job_id: str) -> dict:
             status = data.get("status", "")
 
             if status == "COMPLETED":
-                return data["output"]
+                if "output" not in data:
+                    raise RuntimeError(
+                        f"Job {job_id} completed but response has no 'output' key "
+                        f"(likely endpoint execution timeout). Full response: {data}"
+                    )
+                output = data["output"]
+                if "error" in output:
+                    raise RuntimeError(f"Job {job_id} handler error: {output['error']}")
+                return output
             if status == "FAILED":
                 raise RuntimeError(f"Job {job_id} failed: {data.get('error', data)}")
 

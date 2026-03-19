@@ -18,6 +18,7 @@ import torch
 from diffusers import StableDiffusionXLPipeline
 
 from backend.services.lora.registry import LoRARegistry
+from backend.services.prompt.prompt_composer import derive_video_prompt
 from backend.services.prompt.style_mapper import StyleMapper
 from backend.services.shared.vram_manager import VRAMManager
 from backend.services.storyboard.state import StoryboardStateStore
@@ -83,6 +84,15 @@ class StoryboardService:
         """
         style = StyleMapper().get_style(style_name)
 
+        # Derive video prompts for all scenes before creating state
+        video_prompts: List[str] = []
+        for s in scenes:
+            try:
+                video_prompts.append(derive_video_prompt(s.positive_prompt))
+            except Exception as exc:
+                logger.warning("derive_video_prompt failed for scene %d: %s", s.scene_idx, exc)
+                video_prompts.append(s.positive_prompt)
+
         state = StoryboardState(
             storyboard_id=storyboard_id,
             style=style_name,
@@ -94,9 +104,10 @@ class StoryboardService:
                     scene_idx=s.scene_idx,
                     storyboard_prompt=s.storyboard_prompt,
                     positive_prompt=s.positive_prompt,
+                    video_prompt=video_prompts[i],
                     approved_version=None,
                 )
-                for s in scenes
+                for i, s in enumerate(scenes)
             ],
         )
         self._store.create(state)
@@ -176,6 +187,14 @@ class StoryboardService:
         positive_prompt = prompt_override if prompt_override is not None else scene.positive_prompt
         actual_seed = seed if seed is not None else random.randint(0, 2**32 - 1)
 
+        # Re-derive video_prompt when the image prompt has changed
+        if prompt_override is not None:
+            try:
+                new_video_prompt = derive_video_prompt(positive_prompt)
+                self._store.update_video_prompt(storyboard_id, scene_idx, new_video_prompt)
+            except Exception as exc:
+                logger.warning("derive_video_prompt failed for scene %d regen: %s", scene_idx, exc)
+
         next_version = (max(v.version for v in scene.versions) + 1) if scene.versions else 1
         filename = f"v{next_version}.png"
 
@@ -237,6 +256,12 @@ class StoryboardService:
     def get_state(self, storyboard_id: str) -> Optional[StoryboardState]:
         """Return current StoryboardState, or None if not found."""
         return self._store.load(storyboard_id)
+
+    def update_video_prompt(self, storyboard_id: str, scene_idx: int, video_prompt: str) -> None:
+        """Update the video generation prompt for a scene independently of the image prompt."""
+        if self._store.load(storyboard_id) is None:
+            raise LookupError(f"Storyboard '{storyboard_id}' not found.")
+        self._store.update_video_prompt(storyboard_id, scene_idx, video_prompt)
 
     def approve(
         self,

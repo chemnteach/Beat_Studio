@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-03-19
 **Project:** Beat_Studio - Unified AI music video production platform
-**Current Phase:** Three-Way Model Comparison — v22 Deployed, Ready to Run from Laptop
+**Current Phase:** SkyReels V3 Selected — R2 Upload Strategy for Long Clips
 
 ---
 
@@ -63,8 +63,20 @@ Production-ready music video generation platform combining:
   - [x] RunPod endpoint updated to v22, timeout 1800s, purged
   - [x] SkyReels V3 comparison: 691s, 72 frames, 2.7MB — OK
   - [x] FramePack comparison: 517s, 90 frames, 1.6MB — OK
-- Now: [→] Run WAN 2.2 + full 3-model comparison from laptop (has storyboard images)
-- Next: Review all 3 comparison clips, pick winner, wire as default backend
+  - [x] WAN 2.2: failed all runs (model_index.json missing on network volume)
+  - [x] Winner selected: SkyReels V3
+  - [x] derive_video_prompt() in prompt_composer.py — GPT-4-turbo strips image style/LoRA tokens, adds motion language
+  - [x] video_prompt field added to StoryboardScene (persisted, editable independently via PATCH endpoint)
+  - [x] Video prompt side-by-side editor in StoryboardPreview.tsx
+  - [x] Multi-clip strategy: ceil(duration/8) clips per scene, each duration/num_clips seconds
+  - [x] VideoAssembler.assemble() accepts clips_per_scene — transitions only at scene boundaries
+  - [x] RunPodBackend.generate_clip() clamps to MAX_CLIP_SEC=8 with warning
+  - [x] compare_models.py: better error handling (missing output key, handler errors)
+  - [x] Discovered RunPod payload size limit (~10MB): 7s V3 clips (~24MB base64) exceed it
+  - [x] RunPod endpoint timeout raised to 2400s
+  - [x] 617/619 unit tests passing (2 pre-existing failures from real creds in backend/.env)
+- Now: [→] Implement R2 upload strategy in RunPod worker (worker uploads MP4 to Cloudflare R2, returns URL; backend downloads)
+- Next: Wire SkyReels V3 as default backend in video router
 
 ## Key Decisions
 
@@ -83,11 +95,14 @@ Production-ready music video generation platform combining:
 - `approved_paths_as_ordered_list`: Frontend converts Record<string, string> (scene_index → path) to sorted list before sending to backend, so backend indexing is positional.
 - `video_backend_local_var`: Renamed local `backend` var in _run_generate_video to `video_backend` to avoid shadowing the `backend: str` parameter.
 - `scene_durations_now_wired`: VideoAssembler.assemble() now receives scene_durations from synced_scenes so clips loop/trim to exact beat-aligned durations.
+- `skyreels_v3_winner`: SkyReels V3 selected as production video backend after 3-model comparison. FramePack ok but smaller file, WAN 2.2 never ran (missing model files).
+- `multi_clip_per_scene`: Scenes split into ceil(duration/8) clips of equal duration. No looping. clips_per_scene tracks grouping for assembler. Transitions only at scene boundaries.
+- `runpod_payload_limit`: RunPod serverless output payload ~10MB max. 3s V3 clip (7.6MB raw / ~10MB b64) barely fits. 7s clip (~18MB raw / ~24MB b64) silently dropped — COMPLETED with no output key. Solution: R2 upload from worker, return URL.
+- `v3_generation_time`: SkyReels V3 at 480P takes ~3 min/sec of video on A100. Cold start adds ~5 min. 3s = ~10 min total, 7s = ~25 min GPU-only. Use ≤5s clips until R2 is wired.
 
 ## Blockers
 
-- WAN 2.2 comparison clip still needed (v22 deployed, ready to run)
-- Storyboard images only on laptop — run comparison from there
+- RunPod payload size limit blocks V3 clips >~4s — need R2 upload in worker before longer clips work
 
 ## Open Questions / Known Issues
 
@@ -97,7 +112,7 @@ Production-ready music video generation platform combining:
 - `scene_editor_overrides`: SceneEditor prompt edits not yet wired back through user_overrides — only prompts-stage edits are wired.
 - `skyreels_v2_i2v_pipeline_class`: models.py uses WanImageToVideoPipeline as placeholder — verify exact class from Skywork/SkyReels-V2-I2V-14B-720P model card before deploying.
 - `skyreels_v3_r2v_pipeline`: RESOLVED — uses subprocess via generate_video.py (clone SkyworkAI/SkyReels-V3, copy script to /workspace/models/SkyReels-V3-R2V-14B/).
-- `runpod_winner_selection`: Craig picks winning model after reviewing 15 comparison clips (scene_03, scene_11, scene_17 × 5 models). Then delete losers from network volume.
+- `runpod_winner_selection`: RESOLVED — SkyReels V3 selected. WAN 2.2 never ran (missing model files). FramePack ok but V3 chosen for quality.
 
 ## Working Set
 

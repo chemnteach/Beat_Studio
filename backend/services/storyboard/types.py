@@ -31,6 +31,7 @@ class StoryboardScene:
     storyboard_prompt: str            # The cinematic description used for generation
     positive_prompt: str              # The composed positive prompt (style prefix + scene)
     approved_version: Optional[int]   # None until approved; 1-indexed
+    video_prompt: str = ""            # Auto-derived video generation prompt; editable independently
     versions: List[VersionEntry] = field(default_factory=list)
 
     # Max versions kept on disk before eviction (oldest dropped)

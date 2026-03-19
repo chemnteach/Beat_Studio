@@ -100,8 +100,13 @@ class StoryboardSceneResponse(BaseModel):
     scene_idx: int
     storyboard_prompt: str
     positive_prompt: str
+    video_prompt: str
     approved_version: Optional[int]
     versions: List[VersionEntryResponse]
+
+
+class VideoPromptUpdateRequest(BaseModel):
+    video_prompt: str
 
 
 class StoryboardImagesResponse(BaseModel):
@@ -254,6 +259,7 @@ async def get_storyboard_images(storyboard_id: str) -> StoryboardImagesResponse:
             scene_idx=scene.scene_idx,
             storyboard_prompt=scene.storyboard_prompt,
             positive_prompt=scene.positive_prompt,
+            video_prompt=scene.video_prompt,
             approved_version=scene.approved_version,
             versions=versions,
         ))
@@ -300,6 +306,21 @@ async def regenerate_scene(
         "scene_idx": scene_idx,
         "status": "queued",
     }
+
+
+@router.patch("/{storyboard_id}/scene/{scene_idx}/video-prompt")
+async def update_video_prompt(
+    storyboard_id: str,
+    scene_idx: int,
+    request: VideoPromptUpdateRequest,
+) -> Dict[str, Any]:
+    """Update the video generation prompt for a scene independently of the image prompt."""
+    svc = _get_service()
+    try:
+        svc.update_video_prompt(storyboard_id, scene_idx, request.video_prompt)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"storyboard_id": storyboard_id, "scene_idx": scene_idx, "video_prompt": request.video_prompt}
 
 
 @router.post("/{storyboard_id}/approve")

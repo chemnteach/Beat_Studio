@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
 import uuid
 from pathlib import Path
@@ -324,20 +325,33 @@ def _run_generate_video(
             for sp in scene_prompts
         ]
 
-        # 9. Generate video clips
+        # 9. Generate video clips — split each scene into ≤8s sub-clips
+        _MAX_CLIP_SEC = 8.0
         image_paths = approved_image_paths or []
-        clips = []
+        clips: List[VideoClip] = []
+        clips_per_scene: List[int] = []
+        clip_durations: List[float] = []
+        total_clips = sum(
+            math.ceil(s.duration_sec / _MAX_CLIP_SEC) for s in synced_scenes
+        )
+        clip_idx = 0
         for i, (cp, scene) in enumerate(zip(composed, synced_scenes)):
-            pct = 25.0 + (i / max(len(composed), 1)) * 50.0
-            tm.update_progress(
-                task_id, "generating_clips", pct,
-                f"Generating clip {i + 1}/{len(composed)}…",
-            )
             if i < len(image_paths):
                 cp.init_image_path = image_paths[i]
-            clip = video_backend.generate_clip(cp, scene.duration_sec, resolution, fps=24, seed=i)
-            clip.scene_index = scene.scene_index
-            clips.append(clip)
+            num_clips = math.ceil(scene.duration_sec / _MAX_CLIP_SEC)
+            clip_dur = scene.duration_sec / num_clips
+            for j in range(num_clips):
+                pct = 25.0 + (clip_idx / max(total_clips, 1)) * 50.0
+                tm.update_progress(
+                    task_id, "generating_clips", pct,
+                    f"Scene {i + 1}/{len(composed)} clip {j + 1}/{num_clips}…",
+                )
+                clip = video_backend.generate_clip(cp, clip_dur, resolution, fps=24, seed=clip_idx)
+                clip.scene_index = scene.scene_index
+                clips.append(clip)
+                clip_durations.append(clip_dur)
+                clip_idx += 1
+            clips_per_scene.append(num_clips)
 
         # 10. Select transitions between consecutive scenes
         transition_engine = TransitionEngine()
@@ -355,13 +369,13 @@ def _run_generate_video(
         out_dir.mkdir(parents=True, exist_ok=True)
 
         assembled_path = str(out_dir / "assembled.mp4")
-        scene_durations = [s.duration_sec for s in synced_scenes]
         VideoAssembler().assemble(
             clips, transitions,
             audio_path=analysis.file_path,
             output_path=assembled_path,
             resolution=resolution,
-            scene_durations=scene_durations,
+            scene_durations=clip_durations,
+            clips_per_scene=clips_per_scene,
         )
 
         # 12. Encode for platform

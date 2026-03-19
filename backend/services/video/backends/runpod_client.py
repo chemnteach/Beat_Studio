@@ -39,6 +39,7 @@ _SUPPORTED_STYLES = {
 _COST_PER_SCENE_USD = 0.08   # ~$0.08 per 5s scene on A100 80GB
 _POLL_INTERVAL_SEC  = 5
 _DEFAULT_TIMEOUT    = 2700   # 45 min — covers cold model load (14B from network vol) + generation
+MAX_CLIP_SEC        = 8.0    # hard cap; router is responsible for splitting longer scenes
 
 
 class RunPodBackend(VideoBackend):
@@ -91,6 +92,12 @@ class RunPodBackend(VideoBackend):
         fps: int = 24,
         seed: int = -1,
     ) -> VideoClip:
+        if duration_sec > MAX_CLIP_SEC:
+            logger.warning(
+                "generate_clip called with duration_sec=%.1f > MAX_CLIP_SEC=%.1f — clamping",
+                duration_sec, MAX_CLIP_SEC,
+            )
+            duration_sec = MAX_CLIP_SEC
         t0 = time.time()
         out_path = self._submit_and_poll(prompt, duration_sec, resolution, seed)
         elapsed = time.time() - t0

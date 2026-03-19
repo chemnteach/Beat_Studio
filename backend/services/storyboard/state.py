@@ -83,6 +83,13 @@ class StoryboardStateStore:
             state.error = error
         self._write(state)
 
+    def update_video_prompt(self, storyboard_id: str, scene_idx: int, video_prompt: str) -> None:
+        """Persist an updated video_prompt for one scene."""
+        state = self._require(storyboard_id)
+        scene = self._get_scene(state, scene_idx)
+        scene.video_prompt = video_prompt
+        self._write(state)
+
     def set_approved(
         self,
         storyboard_id: str,
@@ -215,6 +222,7 @@ class StoryboardStateStore:
                     "scene_idx": s.scene_idx,
                     "storyboard_prompt": s.storyboard_prompt,
                     "positive_prompt": s.positive_prompt,
+                    "video_prompt": s.video_prompt,
                     "approved_version": s.approved_version,
                     "versions": [
                         {
@@ -240,6 +248,7 @@ class StoryboardStateStore:
                 scene_idx=s["scene_idx"],
                 storyboard_prompt=s["storyboard_prompt"],
                 positive_prompt=s["positive_prompt"],
+                video_prompt=s.get("video_prompt", ""),
                 approved_version=s.get("approved_version"),
                 versions=[
                     VersionEntry(

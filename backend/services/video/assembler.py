@@ -42,40 +42,51 @@ class VideoAssembler:
         resolution: Tuple[int, int] = (1920, 1080),
         fps: int = 24,
         scene_durations: Optional[List[float]] = None,
+        clips_per_scene: Optional[List[int]] = None,
     ) -> str:
         """Assemble clips into a final video with audio.
 
         Assembly pipeline:
-        1. Validate clips and transitions (len(transitions) == len(clips) - 1)
+        1. Validate clips and transitions
         2. Upscale clips to target resolution if needed
-        3. Apply transitions between consecutive clips
+        3. Apply transitions between scenes (not between intra-scene sub-clips)
         4. Mux with audio track
         5. Encode with FFmpeg
 
         Args:
-            clips: Ordered list of :class:`VideoClip` objects.
-            transitions: Transition configs between clips.
-                Must have exactly ``len(clips) - 1`` entries.
+            clips: Ordered flat list of :class:`VideoClip` objects.
+            transitions: Transition configs between *scenes*.
+                When ``clips_per_scene`` is provided, must have exactly
+                ``len(clips_per_scene) - 1`` entries (one per scene boundary).
+                When ``clips_per_scene`` is omitted, must have ``len(clips) - 1``
+                entries (legacy one-clip-per-scene behaviour).
             audio_path: Path to the audio file to mux in.
             output_path: Destination path for the final video.
             resolution: Target output resolution ``(width, height)``.
             fps: Target frames per second.
-            scene_durations: Intended duration for each clip in seconds.
+            scene_durations: Intended duration for each *clip* in seconds.
                 If provided, clips shorter than their intended duration are
                 looped and trimmed, and clips longer are trimmed.  If omitted,
                 each clip's own ``duration_sec`` is used as-is.
+            clips_per_scene: How many consecutive clips belong to each scene,
+                e.g. ``[2, 1, 3]`` means scene 0 has clips 0–1, scene 1 has
+                clip 2, scene 2 has clips 3–5.  Intra-scene clips are stitched
+                without any transition; transitions are only applied at scene
+                boundaries.  If omitted, falls back to one clip per scene.
 
         Returns:
             Path to the assembled video file (same as ``output_path``).
 
         Raises:
-            ValueError: If ``len(transitions) != len(clips) - 1``.
+            ValueError: If the number of transitions does not match the number
+                of scene boundaries.
         """
-        expected_transitions = max(0, len(clips) - 1)
+        num_scenes = len(clips_per_scene) if clips_per_scene is not None else len(clips)
+        expected_transitions = max(0, num_scenes - 1)
         if len(transitions) != expected_transitions:
             raise ValueError(
-                f"Expected {expected_transitions} transitions for {len(clips)} clips, "
-                f"got {len(transitions)}."
+                f"Expected {expected_transitions} transitions for {num_scenes} scenes "
+                f"({len(clips)} clips), got {len(transitions)}."
             )
 
         logger.info(
@@ -94,6 +105,7 @@ class VideoAssembler:
             resolution=resolution,
             fps=fps,
             scene_durations=scene_durations,
+            clips_per_scene=clips_per_scene,
         )
         return result
 
@@ -108,6 +120,7 @@ class VideoAssembler:
         resolution: Tuple[int, int],
         fps: int,
         scene_durations: Optional[List[float]] = None,
+        clips_per_scene: Optional[List[int]] = None,
     ) -> str:
         """Run FFmpeg concat + audio mux.
 

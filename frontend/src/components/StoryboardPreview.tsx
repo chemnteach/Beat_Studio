@@ -54,6 +54,8 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
   const [sceneLoraWeights, setSceneLoraWeights] = useState<Record<number, Record<string, number>>>({});
   // scene_idx → user-edited positive_prompt; undefined = keep original
   const [promptEdits, setPromptEdits] = useState<Record<number, string>>({});
+  // scene_idx → user-edited video_prompt; undefined = keep original
+  const [videoPromptEdits, setVideoPromptEdits] = useState<Record<number, string>>({});
   // how many scenes have completed images (for generating phase progress bar)
   const [progressSceneCount, setProgressSceneCount] = useState(0);
 
@@ -250,6 +252,19 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
     } finally {
       setIsApproving(false);
     }
+  };
+
+  const saveVideoPrompt = async (sceneIdx: number, videoPrompt: string) => {
+    if (!storyboardId) return;
+    try {
+      await axios.patch(
+        `/api/video/storyboard/${storyboardId}/scene/${sceneIdx}/video-prompt`,
+        { video_prompt: videoPrompt }
+      );
+      // Clear the local edit — the saved value is now the source of truth
+      setVideoPromptEdits(prev => { const n = { ...prev }; delete n[sceneIdx]; return n; });
+      await fetchImages(storyboardId, sceneIdx);
+    } catch { /* ignore — user can retry */ }
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -611,6 +626,55 @@ export function StoryboardPreview({ style, scenes, loraNames, onApprove, onBack 
                   lineHeight: 1.5,
                 }}
               />
+
+              {/* ── Video prompt ── */}
+              <div style={{ marginTop: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '0.7rem', color: '#666', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    Video Prompt
+                  </span>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    {videoPromptEdits[activeScene] !== undefined && (
+                      <button
+                        data-testid="video-prompt-reset-btn"
+                        onClick={() => setVideoPromptEdits(prev => { const n = { ...prev }; delete n[activeScene]; return n; })}
+                        title="Reset to saved video prompt"
+                        style={{ fontSize: '0.6rem', padding: '1px 5px', background: '#16213e', color: '#888' }}
+                      >
+                        reset
+                      </button>
+                    )}
+                    {videoPromptEdits[activeScene] !== undefined && (
+                      <button
+                        data-testid="video-prompt-save-btn"
+                        onClick={() => saveVideoPrompt(activeScene, videoPromptEdits[activeScene]!)}
+                        title="Save video prompt"
+                        style={{ fontSize: '0.6rem', padding: '1px 5px', background: '#0f3460', color: '#e0e0e0' }}
+                      >
+                        save
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <textarea
+                  data-testid="video-prompt-edit-textarea"
+                  value={videoPromptEdits[activeScene] ?? activeSceneData.video_prompt}
+                  onChange={e => setVideoPromptEdits(prev => ({ ...prev, [activeScene]: e.target.value }))}
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    fontSize: '0.7rem',
+                    background: '#0a1a2e',
+                    border: `1px solid ${videoPromptEdits[activeScene] !== undefined ? '#e94560' : '#0f3460'}`,
+                    borderRadius: '4px',
+                    color: '#e0e0e0',
+                    padding: '5px',
+                    resize: 'vertical',
+                    boxSizing: 'border-box',
+                    lineHeight: 1.5,
+                  }}
+                />
+              </div>
             </div>
           )}
 
