@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-03-19
 **Project:** Beat_Studio - Unified AI music video production platform
-**Current Phase:** Three-Way Model Comparison — 2/3 Complete, WAN 2.2 Retesting on v21
+**Current Phase:** Three-Way Model Comparison — v22 Deployed, Ready to Run from Laptop
 
 ---
 
@@ -59,10 +59,11 @@ Production-ready music video generation platform combining:
   - [x] video.py fully wired: RunPodBackend selection, init_image_path per clip, scene_durations to assembler
   - [x] Docker v20: FramePack ndarray fix, built+pushed from Windows
   - [x] Docker v21: Wan2.2 configuration.json check + AutoPipelineForImage2Video
-  - [x] RunPod endpoint updated to v21, timeout 1800s
+  - [x] Docker v22: Fix Wan2.2 loader to DiffusionPipeline (diffusers 0.34.0 compat)
+  - [x] RunPod endpoint updated to v22, timeout 1800s, purged
   - [x] SkyReels V3 comparison: 691s, 72 frames, 2.7MB — OK
   - [x] FramePack comparison: 517s, 90 frames, 1.6MB — OK
-- Now: [→] WAN 2.2 re-running on v21 (configuration.json fix)
+- Now: [→] Run WAN 2.2 + full 3-model comparison from laptop (has storyboard images)
 - Next: Review all 3 comparison clips, pick winner, wire as default backend
 
 ## Key Decisions
@@ -85,8 +86,8 @@ Production-ready music video generation platform combining:
 
 ## Blockers
 
-- WAN 2.2 comparison clip pending (v21 deployed, re-running now)
-- Storyboard images only on laptop (not pushed to GitHub) — need laptop for fresh storyboard runs
+- WAN 2.2 comparison clip still needed (v22 deployed, ready to run)
+- Storyboard images only on laptop — run comparison from there
 
 ## Open Questions / Known Issues
 

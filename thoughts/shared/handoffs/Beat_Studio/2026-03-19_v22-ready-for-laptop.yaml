@@ -1,0 +1,85 @@
+---
+session: Beat_Studio
+date: 2026-03-19
+status: in_progress
+outcome: HANDOFF
+---
+
+goal: Complete three-way model comparison and pick winner for production video backend
+
+now: v22 deployed to RunPod. Run comparison from laptop (has storyboard images).
+
+context: |
+  Three Docker versions built on Windows desktop this session:
+  - v20: FramePack ndarray fix (PIL→numpy in frames_to_mp4_bytes)
+  - v21: Wan2.2 configuration.json check + AutoPipelineForImage2Video (failed: class not in diffusers 0.34.0)
+  - v22: Switched Wan2.2 to DiffusionPipeline.from_pretrained (available in all diffusers versions)
+
+  SkyReels V3 and FramePack both produced video on v20. WAN 2.2 failed on v20 (missing model_index.json),
+  v21 (import error), needs v22 test. Endpoint updated to v22 with 1800s timeout, purged.
+
+  Storyboard images only exist on laptop (output/storyboard/), not on this Windows desktop.
+  Diagnostic images at docs/diagnostics/run_cb217758/ can be used as fallback.
+
+done_this_session:
+  - task: Built/pushed Docker v20, v21, v22 from Windows desktop
+    files: [runpod_worker/src/models.py]
+    notes: Docker Desktop via PowerShell stdin scripts (PATH fix for docker-credential-desktop)
+
+  - task: Ran SkyReels V3 comparison — OK
+    files: [comparison_output/comparison_skyreels.mp4]
+    notes: 691s, 72 frames, 2716 KB
+
+  - task: Ran FramePack comparison — OK
+    files: [comparison_output/comparison_framepack.mp4]
+    notes: 517s, 90 frames, 1622 KB
+
+  - task: Fixed Wan2.2 loader twice
+    files: [runpod_worker/src/models.py]
+    notes: |
+      v21: AutoPipelineForImage2Video — ImportError (not in diffusers 0.34.0)
+      v22: DiffusionPipeline.from_pretrained — universal, auto-detects pipeline class
+
+  - task: Committed and pushed all changes to GitHub
+    files: []
+    notes: 3 commits pushed to main
+
+blockers:
+  - WAN 2.2 comparison clip not yet produced (v22 untested on RunPod)
+
+decisions:
+  - diffusion_pipeline_universal: DiffusionPipeline.from_pretrained works across all diffusers versions and auto-detects pipeline class from config
+  - run_from_laptop: Laptop has storyboard images in output/storyboard/ — run comparison there
+
+findings:
+  - diffusers_version_conflict: SkyReels V3 requirements.txt pins diffusers==0.34.0, overwriting newer versions during Docker build. Must use APIs available in 0.34.0.
+  - docker_builds_slow: Each build ~10min (ffmpeg apt-get not cached). Push fast when layers cached.
+
+next:
+  - step: git pull on laptop
+    who: craig
+
+  - step: Update RunPod endpoint to v22, purge
+    who: craig
+    notes: Already done on desktop — verify on laptop
+
+  - step: Run WAN 2.2 comparison (or full 3-model)
+    who: craig + claude (on laptop)
+    command: |
+      python scripts/compare_models.py \
+        --image output/storyboard/<pick-a-scene>.png \
+        --prompt "A woman standing on a tropical beach at sunset, cinematic lighting, music video style" \
+        --duration 3 --resolution 480 720
+
+  - step: Review all 3 clips, pick winner
+    who: craig
+
+  - step: Wire winner as default backend
+    who: claude
+
+files:
+  created:
+    - thoughts/shared/handoffs/Beat_Studio/2026-03-19_v22-ready-for-laptop.yaml
+  modified:
+    - runpod_worker/src/models.py
+    - thoughts/ledgers/CONTINUITY_CLAUDE-beat-studio.md
