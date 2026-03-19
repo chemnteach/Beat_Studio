@@ -1,8 +1,8 @@
 # Continuity Ledger - Beat_Studio
 
-**Last Updated:** 2026-03-07
+**Last Updated:** 2026-03-19
 **Project:** Beat_Studio - Unified AI music video production platform
-**Current Phase:** End-to-End RunPod Pipeline Fully Wired — Ready to Deploy & Compare
+**Current Phase:** Three-Way Model Comparison — 2/3 Complete, WAN 2.2 Retesting on v21
 
 ---
 
@@ -57,8 +57,13 @@ Production-ready music video generation platform combining:
   - [x] GenerateRequest: added backend, runpod_model, approved_image_paths fields
   - [x] RunPod worker models.py: local /workspace/models paths, Wan2.2-I2V-A14B ID fix, V3 subprocess
   - [x] video.py fully wired: RunPodBackend selection, init_image_path per clip, scene_durations to assembler
-- Now: [→] Craig deploys worker → runs comparison → picks winner
-- Next: Wire winner as default backend, run full Island Girl video
+  - [x] Docker v20: FramePack ndarray fix, built+pushed from Windows
+  - [x] Docker v21: Wan2.2 configuration.json check + AutoPipelineForImage2Video
+  - [x] RunPod endpoint updated to v21, timeout 1800s
+  - [x] SkyReels V3 comparison: 691s, 72 frames, 2.7MB — OK
+  - [x] FramePack comparison: 517s, 90 frames, 1.6MB — OK
+- Now: [→] WAN 2.2 re-running on v21 (configuration.json fix)
+- Next: Review all 3 comparison clips, pick winner, wire as default backend
 
 ## Key Decisions
 
@@ -80,7 +85,8 @@ Production-ready music video generation platform combining:
 
 ## Blockers
 
-- None currently (Craig needs to set up RunPod account + credits to run the comparison)
+- WAN 2.2 comparison clip pending (v21 deployed, re-running now)
+- Storyboard images only on laptop (not pushed to GitHub) — need laptop for fresh storyboard runs
 
 ## Open Questions / Known Issues
 
@@ -109,6 +115,7 @@ Production-ready music video generation platform combining:
 - `runpod_worker/src/models.py` — 5-model loader + generator
 - `backend/services/video/backends/runpod_client.py` — RunPodBackend (VideoBackend subclass)
 - `scripts/runpod_compare.py` — 15-clip comparison runner
+- `scripts/compare_models.py` — 3-model quick comparison (single image + prompt)
 
 ## Test Status
 
@@ -200,6 +207,27 @@ All trained on **SDXL Base 1.0**.
   5. Step 11: `VideoAssembler.assemble()` receives `scene_durations` from `synced_scenes`
   6. Route handler forwards all three new fields to background task
 - Integration test run: 20.8 hours, 15 failed (all pre-existing stubs), 41 passed — no regressions
+
+## Session 2026-03-16: Dev Environment Setup + First Comparison Attempt
+
+**What was done:**
+- Onboarded to project on new Windows/WSL2 machine
+- Verified all dependencies installed (Python 3.12 venv, Node 20, ffmpeg, rubberband)
+- Created `backend/.env` with ANTHROPIC_API_KEY, OPENAI_API_KEY, RUNPOD_API_KEY, RUNPOD_ENDPOINT_ID
+- Built `scripts/compare_models.py` — standalone 3-model comparison (submits to RunPod, polls, saves MP4s)
+- Ran first comparison attempt — all 3 models failed with fixable errors:
+  - SkyReels V3: `executionTimeout exceeded` at 622s (endpoint timeout too low)
+  - WAN 2.2: `No model_index.json` at `/runpod-volume/models/Wan2.2-I2V-A14B` (incomplete download)
+  - FramePack: `append_data requires ndarray` in `frames_to_mp4_bytes` (PIL Images not converted)
+- Fixed FramePack ndarray bug in `runpod_worker/src/models.py` (added `np.array(frame)` conversion)
+- Investigated version history: v19 is current production, our fix should be v20 (not v17)
+- All 16 RunPod backend unit tests pass
+
+**Craig's next steps:**
+1. Build/push Docker v20 from Windows PowerShell
+2. Update RunPod endpoint: image tag → v20, execution timeout → 1800s
+3. Spin up pod, re-download WAN 2.2 to network volume, verify model_index.json
+4. Re-run `scripts/compare_models.py`
 
 ## Session 2026-03-06: RunPod Worker — Local Paths + V3 Subprocess Fix
 

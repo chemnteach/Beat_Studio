@@ -1,0 +1,114 @@
+---
+session: Beat_Studio
+date: 2026-03-15
+status: in_progress
+outcome: HANDOFF
+---
+
+goal: Set up Windows/WSL dev environment for continued Beat Studio development
+
+now: Switch to WSL, activate venv, run pip fixes and setup_check.py
+
+context: |
+  Working on a different Windows 11 machine than usual. Pulled latest from GitHub
+  (95 files, including runpod_worker/, framepack backend, storyboard service, etc.).
+  The venv was created on Linux (venv/bin/ layout) so it only works in WSL, not
+  native Windows. User will switch to WSL to continue.
+
+done_this_session:
+  - task: Pulled latest from GitHub (8dde64e → 013b866, 95 files changed)
+    files: []
+  - task: Audited all three video models for wiring status (full report given)
+    files: []
+    notes: |
+      skyreels_v3_r2v — fully wired and smoke-tested end-to-end
+      wan22_i2v — load + generate implemented, not smoke-tested
+      framepack — load + generate implemented, local backend also exists, not smoke-tested
+  - task: Installed frontend node_modules (367 packages)
+    files: [frontend/node_modules/]
+  - task: Created venv_win/ (Windows-native, Python 3.13.2) — NOT NEEDED, delete it
+    files: [venv_win/]
+    notes: User remembered they work in WSL; this venv is orphaned
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHAT CLAUDE CAN DO (run these in WSL after activating venv)
+# ─────────────────────────────────────────────────────────────────────────────
+
+claude_can_install:
+  - task: Fix chromadb version (1.4.0 → 0.4.22 pinned)
+    command: pip install "chromadb==0.4.22" "numpy<2.0"
+    why: Project requires 0.4.22; current venv has 1.4.0 which has breaking API changes
+
+  - task: Install ruff linter/formatter
+    command: pip install ruff
+    why: Referenced in CLAUDE.md and pyproject.toml for `ruff check .` and `ruff format .`
+
+  - task: Verify/fix any other pip dependency issues
+    command: pip install -r requirements.txt
+    why: Some packages may be missing or broken after the chromadb downgrade
+
+  - task: Delete orphaned Windows venv
+    command: rm -rf venv_win
+    why: Created by mistake before remembering WSL workflow
+
+  - task: Run setup_check.py to validate environment
+    command: python scripts/setup_check.py --quick
+    why: Will reveal any remaining missing deps or config issues
+
+  - task: Download Python ML models (whisper, sentence-transformers, etc.)
+    command: |
+      python -c "import whisper; whisper.load_model('base')"
+      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+    why: Required for audio analysis pipeline; downloads to ~/.cache/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHAT USER MUST DO MANUALLY
+# ─────────────────────────────────────────────────────────────────────────────
+
+user_must_install:
+  - task: Docker Desktop for Windows
+    url: https://www.docker.com/products/docker-desktop/
+    why: Required to build and push RunPod worker images
+    steps:
+      - Download and install Docker Desktop
+      - Enable WSL 2 integration in Settings → Resources → WSL Integration
+      - Verify with `docker --version` in WSL
+
+  - task: API keys in ~/.claude/.env
+    why: Required for LLM calls and cloud video generation
+    keys:
+      - ANTHROPIC_API_KEY (primary LLM — recommended)
+      - OPENAI_API_KEY (fallback LLM — optional)
+      - RUNPOD_API_KEY (cloud video generation)
+      - RUNPOD_ENDPOINT_ID (serverless endpoint ID)
+    notes: Check if these are already set on the other machine and copy them over
+
+  - task: No CUDA needed — Quadro M2000 (4GB VRAM) is too small for video models
+    why: Smallest video model needs 5.6GB VRAM; all video generation stays on RunPod
+    notes: CPU-only PyTorch is fine for this machine. Keep torch CPU build.
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+already_working:
+  - Python 3.13.2 (system) / 3.12.3 (venv)
+  - Node.js 22.14.0 + npm 11.2.0
+  - ffmpeg 8.0.1
+  - git 2.53.0
+  - frontend node_modules installed (367 packages)
+  - All config YAML files present in backend/config/
+  - All source code up to date (latest pull from GitHub)
+
+blockers: []
+
+questions: []
+findings:
+  - gpu: Quadro M2000, 4GB VRAM, CUDA 12.5 driver — display only, too small for ML inference
+
+next:
+  - Switch to WSL
+  - Activate venv: source venv/bin/activate
+  - Let Claude run the pip fixes and setup validation
+  - Install Docker Desktop (user)
+  - Set up API keys (user)
+  - Run full test suite to confirm environment
+  - Resume three-way video comparison work

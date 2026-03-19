@@ -1,0 +1,100 @@
+---
+session: Beat_Studio
+date: 2026-03-19
+status: in_progress
+outcome: HANDOFF
+---
+
+goal: Complete three-way model comparison and pick winner for production video backend
+
+now: WAN 2.2 re-running on v21 (configuration.json fix). 2/3 models already have clips.
+
+context: |
+  Built and pushed Docker v20 (FramePack ndarray fix) and v21 (Wan2.2 config check)
+  from Windows via PowerShell (Docker Desktop). RunPod endpoint updated to v21 with
+  1800s execution timeout. SkyReels V3 and FramePack both produced video successfully.
+  WAN 2.2 failed twice (missing model_index.json → switched to configuration.json check
+  + AutoPipelineForImage2Video). v21 re-test in progress.
+
+done_this_session:
+  - task: Built and pushed Docker v20 from Windows
+    files: [runpod_worker/src/models.py]
+    notes: |
+      Fixed FramePack ndarray bug (np.array(frame) in frames_to_mp4_bytes).
+      Fixed _resolve_models_root() to check /runpod-volume first.
+      Docker Desktop found at C:\Program Files\Docker\Docker\resources\bin\
+      but needed PATH fix for docker-credential-desktop. Used PowerShell stdin scripts.
+
+  - task: Ran first comparison — 2/3 succeeded
+    files: [comparison_output/comparison_skyreels.mp4, comparison_output/comparison_framepack.mp4]
+    notes: |
+      SkyReels V3: 691s, 72 frames, 2716 KB — OK
+      FramePack: 517s, 90 frames, 1622 KB — OK
+      WAN 2.2: FAILED — model_index.json not found (model uses configuration.json)
+
+  - task: Fixed Wan2.2 loader for configuration.json
+    files: [runpod_worker/src/models.py]
+    notes: |
+      Switched from WanImageToVideoPipeline to AutoPipelineForImage2Video.
+      Added pre-flight check for configuration.json (not model_index.json).
+      All 16 RunPod backend unit tests pass.
+
+  - task: Built and pushed Docker v21
+    files: []
+    notes: |
+      chemnteach/beat-studio-worker:v21 (sha256:71cf4081...)
+      Also tagged as :latest. RunPod endpoint updated to v21.
+
+blockers:
+  - WAN 2.2 comparison clip still pending (v21 re-test running)
+  - Storyboard images only exist on laptop, not on this Windows machine
+
+questions: []
+
+decisions:
+  - wan22_auto_pipeline: Use AutoPipelineForImage2Video instead of WanImageToVideoPipeline — auto-detects correct pipeline class from configuration.json
+  - docker_via_powershell: Docker CLI works from Git Bash via powershell.exe stdin scripts with explicit PATH
+  - v21_on_top_of_v20: v20 had FramePack fix, v21 adds Wan2.2 config fix on top
+
+findings:
+  - docker_credential_path: docker-credential-desktop.exe must be on PATH for push to work — same dir as docker.exe
+  - docker_hub_pat_scope: Default PAT scope is read-only — needs Read/Write/Delete for push
+  - venv_broken_in_gitbash: WSL2 venv symlinks broken in Git Bash — must run Python via WSL
+  - skyreels_v3_slow: 691s (~11.5 min) including cold start — but produces good quality at 72 frames
+  - framepack_faster: 517s (~8.6 min) and more frames (90) but smaller file size
+
+worked:
+  - PowerShell stdin scripts for Docker build/push from Git Bash
+  - compare_models.py --models flag for single-model reruns
+  - AutoPipelineForImage2Video for flexible model loading
+
+failed:
+  - Direct docker.exe invocation from WSL (PATH issues with credential helper)
+  - WAN 2.2 with WanImageToVideoPipeline (needs configuration.json not model_index.json)
+
+next:
+  - step: Check WAN 2.2 comparison result
+    who: claude
+    notes: v21 job submitted, waiting for completion
+
+  - step: Review all 3 comparison clips
+    who: craig
+    notes: |
+      comparison_output/comparison_skyreels.mp4
+      comparison_output/comparison_wan22.mp4 (pending)
+      comparison_output/comparison_framepack.mp4
+
+  - step: Pick winner model, wire as default backend
+    who: craig + claude
+
+  - step: Run full storyboard + video on laptop
+    who: craig + claude
+    notes: Laptop has storyboard images in output/storyboard/
+
+files:
+  created:
+    - scripts/compare_models.py
+    - thoughts/shared/handoffs/Beat_Studio/2026-03-19_docker-v21-comparison-progress.yaml
+  modified:
+    - runpod_worker/src/models.py
+    - thoughts/ledgers/CONTINUITY_CLAUDE-beat-studio.md

@@ -1,0 +1,124 @@
+---
+session: Beat_Studio
+date: 2026-03-16
+status: in_progress
+outcome: HANDOFF
+---
+
+goal: Run three-way model comparison (skyreels_v3_r2v, wan22_i2v, framepack) to pick winner for production
+
+now: Craig builds Docker v20, updates RunPod endpoint, re-downloads WAN 2.2, then re-runs comparison
+
+context: |
+  First comparison attempt ran all 3 models but all failed with different fixable issues.
+  FramePack bug fixed in code (ndarray conversion). Other two issues are infrastructure
+  (RunPod timeout + incomplete model download). Docker not available in WSL2 so Craig
+  must build/push from Windows.
+
+done_this_session:
+  - task: Onboarded to project on new Windows/WSL2 machine
+    files: []
+    notes: All deps verified (Python 3.12 venv, Node 20, ffmpeg, rubberband, all pip packages)
+
+  - task: Created backend/.env with all API keys
+    files: [backend/.env]
+    notes: ANTHROPIC_API_KEY, OPENAI_API_KEY, RUNPOD_API_KEY, RUNPOD_ENDPOINT_ID=2zo31rfwfbzsz8
+
+  - task: Built scripts/compare_models.py — standalone 3-model comparison tool
+    files: [scripts/compare_models.py]
+    notes: |
+      Submits same image+prompt to 3 models on RunPod, polls for completion,
+      saves MP4s with timing summary. Args: --image, --prompt, --models, --duration,
+      --resolution, --output-dir, --seed, --negative-prompt
+
+  - task: Ran first comparison — all 3 models failed
+    files: []
+    notes: |
+      skyreels_v3_r2v: executionTimeout exceeded at 622s (endpoint timeout too low)
+      wan22_i2v: OSError no model_index.json at /runpod-volume/models/Wan2.2-I2V-A14B
+      framepack: ValueError append_data requires ndarray (PIL Images not converted)
+
+  - task: Fixed FramePack ndarray bug in models.py
+    files: [runpod_worker/src/models.py]
+    notes: |
+      Added `import numpy as np` and `np.array(frame)` conversion in frames_to_mp4_bytes()
+      so PIL Images become numpy arrays before imageio writes them. All 16 unit tests pass.
+
+  - task: Investigated Docker version history — v19 is production, fix goes in v20
+    files: []
+    notes: |
+      v18: had 600s subprocess timeout bug + cu124 crashes on Blackwell
+      v19: fixed timeout (1800s), torch 2.6+cu126, path auto-detect. Smoke test passed.
+      v20: adds FramePack ndarray fix on top of v19
+
+blockers:
+  - Docker Desktop not available in WSL2 — Craig must build/push from Windows
+  - RunPod execution timeout currently too low for SkyReels cold start
+  - WAN 2.2 model incompletely downloaded to network volume
+
+questions: []
+
+decisions:
+  - version_numbering: v20 (not v17) — v19 is current production, our fix is additive
+  - wan_path_correct: /runpod-volume/models is correct for serverless (not /workspace)
+  - comparison_image: docs/diagnostics/run_cb217758/scene02_watercolor_girl.png (Island Girl storyboard)
+
+findings:
+  - runpod_timeout: Endpoint execution timeout must be >= 1800s for 14B model cold loads
+  - wan22_download: model_index.json missing — incomplete HF download, needs re-run from pod
+  - framepack_pil_bug: Pipeline returns PIL Images but imageio expects numpy arrays
+  - docker_wsl2: Docker Desktop WSL2 integration not configured on this machine
+
+worked:
+  - compare_models.py script structure and RunPod API integration
+  - Environment setup — all Python/Node deps already installed in venv
+  - Unit tests pass after ndarray fix
+
+failed:
+  - All 3 models in first comparison run (infrastructure issues, not code logic)
+  - Attempted WAN path "fix" to /workspace — reverted (serverless uses /runpod-volume)
+
+next:
+  - step: Build and push Docker v20
+    who: craig
+    command: |
+      cd runpod_worker
+      docker build -t chemnteach/beat-studio-worker:v20 -t chemnteach/beat-studio-worker:latest .
+      docker push chemnteach/beat-studio-worker:v20
+      docker push chemnteach/beat-studio-worker:latest
+
+  - step: Update RunPod endpoint
+    who: craig
+    where: RunPod Console → Serverless → endpoint settings
+    actions:
+      - Change template image to chemnteach/beat-studio-worker:v20
+      - Set execution timeout to 1800 seconds
+
+  - step: Re-download WAN 2.2 model
+    who: craig
+    where: RunPod Console → spin up temp pod with network volume
+    command: |
+      huggingface-cli download Wan-AI/Wan2.2-I2V-A14B \
+        --local-dir /runpod-volume/models/Wan2.2-I2V-A14B
+      ls /runpod-volume/models/Wan2.2-I2V-A14B/model_index.json
+      # Then terminate the pod
+
+  - step: Re-run three-way comparison
+    who: claude
+    command: |
+      cd /mnt/c/src/Synterra/Beat_Studio/Beat_Studio
+      ./venv/bin/python scripts/compare_models.py \
+        --image docs/diagnostics/run_cb217758/scene02_watercolor_girl.png \
+        --prompt "A woman standing on a tropical beach at sunset, cinematic lighting, music video style" \
+        --duration 3 --resolution 480 720
+
+  - step: Pick winner model, wire as default backend
+    who: craig + claude
+
+files:
+  created:
+    - scripts/compare_models.py
+    - backend/.env
+  modified:
+    - runpod_worker/src/models.py
+    - thoughts/ledgers/CONTINUITY_CLAUDE-beat-studio.md
