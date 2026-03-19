@@ -181,7 +181,7 @@ def _load_skyreels_v2_df():
 
 
 def _load_wan22_i2v():
-    from diffusers import AutoPipelineForImage2Video
+    from diffusers import DiffusionPipeline
 
     model_dir = Path(_WAN22_I2V)
     if not model_dir.exists():
@@ -195,7 +195,7 @@ def _load_wan22_i2v():
         )
 
     logger.info("Loading Wan 2.2 I2V from %s", _WAN22_I2V)
-    pipe = AutoPipelineForImage2Video.from_pretrained(
+    pipe = DiffusionPipeline.from_pretrained(
         _WAN22_I2V, torch_dtype=torch.bfloat16,
     )
     pipe.enable_model_cpu_offload()
