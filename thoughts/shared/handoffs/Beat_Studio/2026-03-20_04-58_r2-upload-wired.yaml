@@ -1,0 +1,102 @@
+---
+session: Beat_Studio
+date: 2026-03-20
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Implement Cloudflare R2 upload in RunPod worker to bypass 10MB payload limit
+
+now: Build/push Docker v24 from Windows, update RunPod endpoint, re-run 7s scene_11 test
+
+test: conda run -n beatcanvas python -m pytest backend/tests/unit/test_runpod_backend.py -q
+
+done_this_session:
+  - task: Implemented R2 upload in RunPod worker (handler.py)
+    files: [runpod_worker/src/handler.py]
+    notes: |
+      _upload_to_r2(mp4_bytes) -> presigned URL (1-hour TTL).
+      Worker now returns {video_url, model, duration_sec, frames, elapsed_sec}.
+      Added botocore.config.Config(signature_version="s3v4") — required for R2.
+      Explicit env var validation with EnvironmentError listing missing vars by name.
+      Error string truncated to 500 chars so RunPod result payload stays small.
+
+  - task: Added boto3 to Dockerfile
+    files: [runpod_worker/Dockerfile]
+    notes: RUN pip install --no-cache-dir boto3 after requirements install
+
+  - task: Updated RunPodBackend to handle video_url response
+    files: [backend/services/video/backends/runpod_client.py]
+    notes: |
+      _submit_and_poll: checks video_url first (new), falls back to video_b64 (legacy).
+      Downloads via httpx.get(url, timeout=120).
+      _poll: raises RuntimeError on missing output key (was the silent payload-overflow failure)
+      and on output["error"] from handler.
+
+  - task: Updated compare_models.py for video_url response
+    files: [scripts/compare_models.py]
+    notes: save_video() handles both video_url (httpx download) and video_b64 (legacy base64)
+
+  - task: Added 2 new _poll tests
+    files: [backend/tests/unit/test_runpod_backend.py]
+    notes: |
+      test_poll_raises_when_output_key_missing — payload-too-large case
+      test_poll_raises_when_handler_returns_error — handler error in output
+      Updated test_poll_returns_output_on_completed to use video_url instead of video_b64
+      All 21 RunPod tests pass. 619/621 unit tests pass (2 pre-existing env leak failures).
+
+  - task: Fixed SigV4 signing issue (v24)
+    files: [runpod_worker/src/handler.py]
+    notes: |
+      First test attempt (v23) produced 168 frames / 16.5MB but failed with
+      "400 Bad Request on job-done callback" — R2 was rejecting put_object due to
+      wrong signature version. Added Config(signature_version="s3v4") to boto3 client.
+
+decisions:
+  - r2_sigv4_required: Cloudflare R2 requires explicit SigV4 signing; boto3 with
+      region_name="auto" alone is not sufficient — must pass Config(signature_version="s3v4")
+  - error_truncation: R2 error messages truncated to 500 chars in handler return to prevent
+      RunPod result payload from growing large with boto3 stack traces
+
+findings:
+  - v23_cold_start: First v23 run sat IN_QUEUE for 45 min and timed out — likely worker
+      crash on startup or image pull issue; endpoint showed workers never became available
+  - v23_400_on_r2: Second run (after endpoint confirm) — video generated successfully
+      (168 frames, 16.5MB) but got 400 from R2 on put_object due to missing SigV4 config
+  - r2_env_vars: R2_ACCOUNT_ID in .env is the full endpoint URL including https://
+      (https://87f8328f074f743b2b2477f130954593.r2.cloudflarestorage.com), not just the account ID
+
+next:
+  - step: Build and push Docker v24 from Windows
+    who: craig
+    notes: Same PowerShell stdin pattern. Tag chemnteach/beat-studio-worker:v24.
+    command: |
+      Get-Content runpod_worker\Dockerfile | docker build -t chemnteach/beat-studio-worker:v24 -f - runpod_worker
+      docker push chemnteach/beat-studio-worker:v24
+
+  - step: Update RunPod endpoint to v24, verify R2 env vars, purge workers
+    who: craig
+    notes: |
+      Confirm all 4 R2 env vars are set on the endpoint:
+        R2_ACCOUNT_ID     = https://87f8328f074f743b2b2477f130954593.r2.cloudflarestorage.com
+        R2_ACCESS_KEY_ID  = 1ab5b24cbc77d4cccf4ee6f54f29f840
+        R2_SECRET_ACCESS_KEY = 46a3b1b6f0a01a89ecd459f500de8fbc5d51fb294ae7ad12d3c2444d7bd153ce
+        R2_BUCKET_NAME    = beat-studio-clips
+
+  - step: Re-run 7s scene_11 test
+    who: craig + claude
+    command: |
+      conda run -n beatcanvas python scripts/compare_models.py \
+        --image output/storyboard/ff630056-1dd7-4552-a983-f935a0eded24/scene_11/v1.png \
+        --prompt "Beautiful Aruban woman in flowing white linen dress with gold embroidered hem, dark wavy hair moving gently in ocean breeze, barefoot on golden sand, warm confident smile, white dress rippling in the wind, cobalt blue sky above, waves rolling onto shore, golden afternoon light shifting warmly, intimate cinematic framing, slow drift, dreamlike atmosphere" \
+        --duration 7 --resolution 480 720 --models skyreels_v3_r2v
+
+files:
+  created:
+    - thoughts/shared/handoffs/Beat_Studio/2026-03-20_04-58_r2-upload-wired.yaml
+  modified:
+    - runpod_worker/src/handler.py
+    - runpod_worker/Dockerfile
+    - backend/services/video/backends/runpod_client.py
+    - backend/tests/unit/test_runpod_backend.py
+    - scripts/compare_models.py
