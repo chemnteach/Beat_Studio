@@ -28,6 +28,7 @@ import traceback
 import uuid
 
 import boto3
+import botocore.config
 import runpod
 from PIL import Image
 
@@ -46,18 +47,34 @@ def _decode_image(b64_str: str) -> Image.Image:
 
 
 def _upload_to_r2(mp4_bytes: bytes) -> str:
-    """Upload MP4 bytes to Cloudflare R2 and return a presigned URL (1-hour TTL)."""
-    endpoint_url = os.environ["R2_ACCOUNT_ID"]   # full URL e.g. https://<id>.r2.cloudflarestorage.com
-    access_key   = os.environ["R2_ACCESS_KEY_ID"]
-    secret_key   = os.environ["R2_SECRET_ACCESS_KEY"]
-    bucket       = os.environ["R2_BUCKET_NAME"]
+    """Upload MP4 bytes to Cloudflare R2 and return a presigned URL (1-hour TTL).
 
+    Required env vars on the RunPod endpoint:
+      R2_ACCOUNT_ID        — full endpoint URL: https://<account_id>.r2.cloudflarestorage.com
+      R2_ACCESS_KEY_ID     — R2 API token access key
+      R2_SECRET_ACCESS_KEY — R2 API token secret key
+      R2_BUCKET_NAME       — bucket name (e.g. beat-studio-clips)
+    """
+    endpoint_url = os.environ.get("R2_ACCOUNT_ID", "")
+    access_key   = os.environ.get("R2_ACCESS_KEY_ID", "")
+    secret_key   = os.environ.get("R2_SECRET_ACCESS_KEY", "")
+    bucket       = os.environ.get("R2_BUCKET_NAME", "")
+
+    missing = [k for k, v in [
+        ("R2_ACCOUNT_ID", endpoint_url), ("R2_ACCESS_KEY_ID", access_key),
+        ("R2_SECRET_ACCESS_KEY", secret_key), ("R2_BUCKET_NAME", bucket),
+    ] if not v]
+    if missing:
+        raise EnvironmentError(f"Missing R2 env vars: {', '.join(missing)}")
+
+    # R2 requires SigV4 signing — must be set explicitly for boto3
     s3 = boto3.client(
         "s3",
         endpoint_url=endpoint_url,
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
         region_name="auto",
+        config=botocore.config.Config(signature_version="s3v4"),
     )
 
     key = f"clips/{uuid.uuid4().hex}.mp4"
@@ -137,10 +154,11 @@ def handler(job: dict) -> dict:
     # Upload to R2 and return URL — avoids ~10MB RunPod payload limit
     try:
         video_url = _upload_to_r2(mp4_bytes)
-    except Exception:
+    except Exception as exc:
         tb = traceback.format_exc()
         logger.error("R2 upload failed:\n%s", tb)
-        return {"error": f"R2 upload failed: {tb}"}
+        # Truncate to keep payload small — full tb is in worker logs
+        return {"error": f"R2 upload failed: {type(exc).__name__}: {exc}"[:500]}
 
     logger.info(
         "Job complete: model=%s duration=%.1fs frames~%d elapsed=%.1fs size=%dKB",
