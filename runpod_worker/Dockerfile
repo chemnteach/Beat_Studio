@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir torch==2.6.0 torchvision==0.21.0 --index-url http
 # Install remaining deps, excluding torch/torchvision/torchaudio (exact match, not torchao)
 RUN grep -vE "^(torch|torchvision|torchaudio)$" requirements.txt \
     | pip install --no-cache-dir -r /dev/stdin
+RUN pip install --no-cache-dir boto3
 
 # Clone full SkyReels-V3 repo so skyreels_v3 package is importable
 RUN git clone https://github.com/SkyworkAI/SkyReels-V3 /app/SkyReels-V3

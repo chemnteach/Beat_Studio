@@ -124,7 +124,7 @@ class TestPoll:
 
     def test_poll_returns_output_on_completed(self):
         backend = _make_backend(timeout_sec=30)
-        completed_resp = self._mock_response("COMPLETED", output={"video_b64": "abc123"})
+        completed_resp = self._mock_response("COMPLETED", output={"video_url": "https://r2.example.com/clips/abc.mp4"})
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
@@ -133,7 +133,36 @@ class TestPoll:
         with patch("backend.services.video.backends.runpod_client.httpx.Client", return_value=mock_client):
             result = backend._poll("job-123")
 
-        assert result == {"video_b64": "abc123"}
+        assert result == {"video_url": "https://r2.example.com/clips/abc.mp4"}
+
+    def test_poll_raises_when_output_key_missing(self):
+        """COMPLETED with no 'output' key → payload too large — must raise RuntimeError."""
+        backend = _make_backend(timeout_sec=30)
+        # Simulate RunPod silently dropping oversized payload
+        resp = MagicMock()
+        resp.json.return_value = {"status": "COMPLETED"}  # no 'output' key
+        resp.raise_for_status = MagicMock()
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = resp
+
+        with patch("backend.services.video.backends.runpod_client.httpx.Client", return_value=mock_client):
+            with pytest.raises(RuntimeError, match="no 'output' key"):
+                backend._poll("job-big")
+
+    def test_poll_raises_when_handler_returns_error(self):
+        """COMPLETED with output={'error': '...'} → handler error — must raise RuntimeError."""
+        backend = _make_backend(timeout_sec=30)
+        completed_resp = self._mock_response("COMPLETED", output={"error": "CUDA OOM"})
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = completed_resp
+
+        with patch("backend.services.video.backends.runpod_client.httpx.Client", return_value=mock_client):
+            with pytest.raises(RuntimeError, match="CUDA OOM"):
+                backend._poll("job-err")
 
     def test_poll_raises_on_failed(self):
         backend = _make_backend(timeout_sec=30)

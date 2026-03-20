@@ -146,8 +146,13 @@ def poll_job(job_id: str) -> dict:
 
 
 def save_video(output: dict, out_path: Path) -> int:
-    """Decode base64 video from output and write to disk. Returns size in bytes."""
-    video_bytes = base64.b64decode(output["video_b64"])
+    """Fetch video from output (URL or base64) and write to disk. Returns size in bytes."""
+    if "video_url" in output:
+        resp = httpx.get(output["video_url"], timeout=120)
+        resp.raise_for_status()
+        video_bytes = resp.content
+    else:
+        video_bytes = base64.b64decode(output["video_b64"])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(video_bytes)
     return len(video_bytes)

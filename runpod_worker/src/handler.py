@@ -11,19 +11,23 @@ Job input schema:
   ref_images     list[str] — additional base64 PNGs (SkyReels-V3 R2V only)
 
 Job output schema:
-  video_b64      str   — base64-encoded MP4
+  video_url      str   — presigned Cloudflare R2 URL (1-hour TTL)
   model          str   — model that was used
   duration_sec   float — actual clip duration (may differ from requested due to frame snapping)
   frames         int   — number of frames generated
+  elapsed_sec    float — generation time in seconds
 """
 from __future__ import annotations
 
 import base64
 import io
 import logging
+import os
 import time
 import traceback
+import uuid
 
+import boto3
 import runpod
 from PIL import Image
 
@@ -39,6 +43,33 @@ logger = logging.getLogger("beat_studio.worker.handler")
 def _decode_image(b64_str: str) -> Image.Image:
     image_bytes = base64.b64decode(b64_str)
     return Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+
+def _upload_to_r2(mp4_bytes: bytes) -> str:
+    """Upload MP4 bytes to Cloudflare R2 and return a presigned URL (1-hour TTL)."""
+    endpoint_url = os.environ["R2_ACCOUNT_ID"]   # full URL e.g. https://<id>.r2.cloudflarestorage.com
+    access_key   = os.environ["R2_ACCESS_KEY_ID"]
+    secret_key   = os.environ["R2_SECRET_ACCESS_KEY"]
+    bucket       = os.environ["R2_BUCKET_NAME"]
+
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=endpoint_url,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name="auto",
+    )
+
+    key = f"clips/{uuid.uuid4().hex}.mp4"
+    s3.put_object(Bucket=bucket, Key=key, Body=mp4_bytes, ContentType="video/mp4")
+
+    url = s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=3600,  # 1 hour
+    )
+    logger.info("Uploaded clip to R2: key=%s size=%dKB", key, len(mp4_bytes) // 1024)
+    return url
 
 
 def handler(job: dict) -> dict:
@@ -103,7 +134,13 @@ def handler(job: dict) -> dict:
     estimated_frames = int(duration_sec * fps)
     actual_duration = estimated_frames / fps
 
-    video_b64 = base64.b64encode(mp4_bytes).decode()
+    # Upload to R2 and return URL — avoids ~10MB RunPod payload limit
+    try:
+        video_url = _upload_to_r2(mp4_bytes)
+    except Exception:
+        tb = traceback.format_exc()
+        logger.error("R2 upload failed:\n%s", tb)
+        return {"error": f"R2 upload failed: {tb}"}
 
     logger.info(
         "Job complete: model=%s duration=%.1fs frames~%d elapsed=%.1fs size=%dKB",
@@ -111,7 +148,7 @@ def handler(job: dict) -> dict:
     )
 
     return {
-        "video_b64": video_b64,
+        "video_url": video_url,
         "model": model,
         "duration_sec": actual_duration,
         "frames": estimated_frames,

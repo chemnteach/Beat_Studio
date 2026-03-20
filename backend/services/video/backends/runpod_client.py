@@ -193,11 +193,18 @@ class RunPodBackend(VideoBackend):
         logger.info("RunPod job submitted: %s (model=%s)", job_id, self._model_name)
         result = self._poll(job_id)
 
-        # Decode and write MP4
-        video_bytes = base64.b64decode(result["video_b64"])
-        tmp = tempfile.NamedTemporaryFile(
-            suffix=".mp4", prefix="rp_", delete=False,
-        )
+        # Fetch video bytes — new workers return a URL; legacy return base64
+        if "video_url" in result:
+            url = result["video_url"]
+            logger.info("Downloading clip from R2: %s…", url[:80])
+            with httpx.Client(timeout=120) as dl_client:
+                dl_resp = dl_client.get(url)
+                dl_resp.raise_for_status()
+                video_bytes = dl_resp.content
+        else:
+            video_bytes = base64.b64decode(result["video_b64"])
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp4", prefix="rp_", delete=False)
         tmp.write(video_bytes)
         tmp.close()
         logger.info("RunPod clip saved: %s (%d KB)", tmp.name, len(video_bytes) // 1024)
@@ -217,7 +224,17 @@ class RunPodBackend(VideoBackend):
                 status = data.get("status", "")
 
                 if status == "COMPLETED":
-                    return data["output"]
+                    if "output" not in data:
+                        raise RuntimeError(
+                            f"RunPod job {job_id} completed but response has no 'output' key "
+                            f"(likely payload too large). Full response: {data}"
+                        )
+                    output = data["output"]
+                    if "error" in output:
+                        raise RuntimeError(
+                            f"RunPod job {job_id} handler error: {output['error']}"
+                        )
+                    return output
                 if status == "FAILED":
                     raise RuntimeError(
                         f"RunPod job {job_id} failed: {data.get('error', data)}"
