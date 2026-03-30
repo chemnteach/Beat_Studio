@@ -1,0 +1,71 @@
+---
+session: Beat_Studio
+date: 2026-03-29
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Overhaul audio segmentation pipeline — boundary detection, labeling, lyrics alignment
+now: Address type-label mismatches (chorus↔verse↔pre_chorus) using Whisper hook lyrics as discriminator
+test: python -m pytest backend/tests/unit/ -q
+
+done_this_session:
+  - task: Diagnose segmentation regression — traced pipeline end-to-end, found b9068a1 rewrite removed energy-aware labeling and switched chroma_stft for chroma_cqt
+    files: [backend/services/audio/analysis.py, backend/services/audio/analyzer.py]
+  - task: Step 1 — Wire post_process_sections into analyzer.py after _build_sections
+    files: [backend/services/audio/analyzer.py]
+  - task: Step 2 — Restore chroma_cqt in analysis.py (was silently switched to chroma_stft)
+    files: [backend/services/audio/analysis.py]
+  - task: Step 3 — Implement _align_lyrics_to_sections (Whisper segments → section lyrical_content by midpoint)
+    files: [backend/services/audio/analyzer.py]
+  - task: Step 4 — Implement relabel_by_lyrical_repetition (Jaccard similarity, threshold 0.5, promotes repeated sections to chorus)
+    files: [backend/services/audio/analysis.py]
+  - task: Step 5 — Replace hard-coded k=min(8,...) with novelty-curve boundary detection; add _adaptive_k and _novelty_boundaries; retire agglomerative clustering from detect_sections
+    files: [backend/services/audio/analysis.py]
+  - task: Add pre_chorus to section vocabulary; fires in post_process_sections step 4 when verse precedes chorus with energy >= 0.6x chorus and less than chorus
+    files: [backend/services/audio/analysis.py, backend/services/audio/types.py]
+  - task: Add 20 unit tests covering _align_lyrics_to_sections, relabel_by_lyrical_repetition, _adaptive_k, TestPreChorusLabeling
+    files: [backend/tests/unit/test_audio_analyzer.py]
+
+blockers: []
+
+questions:
+  - Type-label mismatches remain for sections where energy dynamic range is compressed (verse/chorus/pre_chorus all 0.83-1.00 energy). Energy alone cannot discriminate.
+  - Bridge (GT 160-190s) is being labeled chorus by energy; needs either lyrical or structural signal to distinguish.
+
+decisions:
+  - novelty_boundaries_over_agglomerative: The checkerboard novelty curve peaks are used directly as section boundaries. librosa.segment.agglomerative was retired because it clusters acoustically similar sections together regardless of k, collapsing verse+pre_chorus+chorus into one blob. The novelty curve correctly detects harmonic transitions.
+  - beat_sync_chroma: Both the novelty curve computation and (previously) agglomerative run on beat-synchronised chroma. This reduces noise and aligns boundaries to the musical grid.
+  - pre_chorus_threshold_0_6: pre_chorus fires when section energy >= 60% of following chorus energy AND less than chorus. Empirically chosen; captures typical build-up sections without false positives on low-energy verses.
+
+findings:
+  - island_girl_comparison: 9 sections produced (GT=8), 6/7 GT inner boundaries within 10s, all sections have lyrics populated. Boundary detection dramatically improved (was 1/7 within 10s before Step 5).
+  - type_mismatch_root_cause: In this song, chorus/verse/pre_chorus sections have similar RMS energy (0.83-1.00 normalised). The energy-median discriminator in post_process_sections step 3 cannot distinguish them. Lyrics are the better signal.
+  - whisper_lyrics_are_good: Whisper base model transcription is accurate. Lyrical content is now correctly distributed across all sections via _align_lyrics_to_sections midpoint assignment.
+  - relabel_jaccard_not_firing: relabel_by_lyrical_repetition (Jaccard threshold 0.5) did not promote the true choruses in Island Girl because the chorus lyrics vary across repeats (not a simple hook). Need a different approach — e.g., keyword/phrase extraction for the song title or recurring phrase.
+
+worked:
+  - Checkerboard novelty curve (Foote 2000) on beat-sync chroma for boundary detection
+  - Filtering novelty peaks in first 10s / last 15s of song eliminates spurious transient boundaries
+  - post_process_sections energy-based relabeling as a first-pass before lyric refinement
+  - Whisper segment midpoint assignment for lyrical_content population
+
+failed:
+  - librosa.segment.agglomerative with adaptive k — even with beat-sync chroma, clusters acoustically similar sections together, producing large undifferentiated blobs in the first half of the song
+  - Jaccard similarity for chorus detection in Island Girl — lyrics vary too much across chorus repetitions to reach 0.5 threshold
+
+next:
+  - Use Whisper lyrics as primary type discriminator: extract recurring phrases/keywords (song title, hook words), sections containing them are chorus candidates
+  - Alternatively: use lyrical_function LLM field (when backend/services/llm/semantic.py is implemented) to assign chorus/verse/bridge/pre_chorus from text
+  - Lower Jaccard threshold to 0.35 and test on Island Girl — may catch partial lyrical repetition
+  - Investigate why bridge (160-190s) consistently gets labeled chorus — its energy is high (GT: bridge, energy=0.934 range). May need a structural heuristic (e.g., section that appears once and is not intro/outro is a candidate for bridge if followed by chorus).
+  - Commit the segmentation pipeline overhaul to git
+
+files:
+  created:
+    - thoughts/shared/handoffs/Beat_Studio/2026-03-29_19-01_segmentation-pipeline-overhaul.yaml
+  modified:
+    - backend/services/audio/analysis.py
+    - backend/services/audio/analyzer.py
+    - backend/services/audio/types.py
+    - backend/tests/unit/test_audio_analyzer.py

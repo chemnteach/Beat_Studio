@@ -17,22 +17,164 @@ except ImportError:  # pragma: no cover
     librosa = None  # type: ignore[assignment]
 
 
+def _adaptive_k(
+    chroma: np.ndarray,
+    y: np.ndarray,
+    sr: int,
+    hop_length: int = 512,
+    min_k: int = 4,
+    max_k: int = 14,
+) -> int:
+    """Estimate the number of agglomerative boundary frames via novelty curve.
+
+    Beat-synchronises the chroma to the musical grid, builds an affinity
+    recurrence matrix, applies a checkerboard kernel (Foote 2000) along the
+    diagonal to produce a novelty curve, and peak-picks to count structural
+    transitions.  Returns a k suitable for librosa.segment.agglomerative,
+    where k boundaries yield k-1 sections.
+    """
+    try:
+        from scipy.ndimage import convolve as _ndimage_conv
+
+        _, beats = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop_length)
+        beat_times = librosa.frames_to_time(beats, sr=sr, hop_length=hop_length)
+        duration = float(librosa.get_duration(y=y, sr=sr))
+
+        if len(beats) > 4:
+            chroma_sync = librosa.util.sync(chroma, beats, aggregate=np.median)
+        else:
+            chroma_sync = chroma
+            beat_times = np.linspace(0.0, duration, chroma.shape[1])
+
+        n_frames = chroma_sync.shape[1]
+        if n_frames < 8:
+            return min_k
+
+        # Affinity self-similarity matrix
+        R = librosa.segment.recurrence_matrix(chroma_sync, mode='affinity', sym=True)
+
+        # Checkerboard kernel (L=8: four 4×4 quadrants)
+        half = 4
+        ones = np.ones((half, half))
+        kernel = np.block([[-ones, ones], [ones, -ones]])
+
+        novelty_map = _ndimage_conv(
+            R.astype(np.float32), kernel.astype(np.float32),
+            mode='constant', cval=0.0,
+        )
+        novelty = np.diag(novelty_map)
+        novelty = np.maximum(novelty, 0.0)
+        if novelty.max() > 0:
+            novelty /= novelty.max()
+
+        win = max(1, n_frames // 20)
+        peaks = librosa.util.peak_pick(
+            novelty,
+            pre_max=win, post_max=win,
+            pre_avg=win * 3, post_avg=win * 3,
+            delta=0.10, wait=win,
+        )
+
+        # Discard spurious peaks at song start / end (within 10s / 15s respectively)
+        filtered = [
+            p for p in peaks
+            if 10.0 < float(beat_times[min(int(p), len(beat_times) - 1)]) < duration - 15.0
+        ]
+
+        # n filtered internal boundaries + start frame → n+1 boundaries → n sections
+        # librosa.segment.agglomerative(chroma, k) returns k boundaries → k-1 sections
+        # so pass k = n_filtered + 2 to get n_filtered + 1 sections
+        k = len(filtered) + 2
+        logger.info("Adaptive k: %d peaks (raw=%d) → k=%d", len(filtered), len(peaks), k)
+        return max(min_k, min(max_k, k))
+
+    except Exception as exc:
+        logger.warning("Adaptive k estimation failed: %s — using default k=9", exc)
+        return 9
+
+
+def _novelty_boundaries(
+    chroma: np.ndarray,
+    y: np.ndarray,
+    sr: int,
+    duration: float,
+    hop_length: int = 512,
+) -> np.ndarray:
+    """Return section boundary times (seconds) via checkerboard novelty peaks.
+
+    Beats are used to synchronise the chroma before building the self-similarity
+    matrix, which reduces noise and aligns boundaries to the musical grid.
+    The result always includes 0.0 and duration as the first/last elements.
+    Falls back to uniform 8-chunk segmentation on any failure.
+    """
+    from scipy.ndimage import convolve as _ndimage_conv
+
+    _, beats = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop_length)
+    beat_times = librosa.frames_to_time(beats, sr=sr, hop_length=hop_length)
+
+    if len(beats) > 4:
+        chroma_sync = librosa.util.sync(chroma, beats, aggregate=np.median)
+    else:
+        chroma_sync = chroma
+        beat_times = np.linspace(0.0, duration, chroma.shape[1])
+
+    n_frames = chroma_sync.shape[1]
+    if n_frames < 8:
+        return np.array([0.0, duration])
+
+    R = librosa.segment.recurrence_matrix(chroma_sync, mode='affinity', sym=True)
+
+    half = 4
+    ones = np.ones((half, half))
+    kernel = np.block([[-ones, ones], [ones, -ones]])
+
+    novelty_map = _ndimage_conv(
+        R.astype(np.float32), kernel.astype(np.float32),
+        mode='constant', cval=0.0,
+    )
+    novelty = np.diag(novelty_map)
+    novelty = np.maximum(novelty, 0.0)
+    if novelty.max() > 0:
+        novelty /= novelty.max()
+
+    win = max(1, n_frames // 20)
+    peaks = librosa.util.peak_pick(
+        novelty,
+        pre_max=win, post_max=win,
+        pre_avg=win * 3, post_avg=win * 3,
+        delta=0.10, wait=win,
+    )
+
+    # Discard spurious peaks within 10s of song start or 15s of song end
+    filtered = [
+        p for p in peaks
+        if 10.0 < float(beat_times[min(int(p), len(beat_times) - 1)]) < duration - 15.0
+    ]
+    peak_times = [float(beat_times[min(int(p), len(beat_times) - 1)]) for p in filtered]
+
+    logger.info("Novelty boundaries: %d peaks (raw=%d)", len(filtered), len(peaks))
+    return np.array([0.0] + peak_times + [duration])
+
+
 def detect_sections(
     y: np.ndarray,
     sr: int,
     n_segments: int = 8,
 ) -> List[Tuple[float, float]]:
-    """Detect section boundaries using spectral agglomerative clustering.
+    """Detect section boundaries from a checkerboard novelty curve.
+
+    Beat-synchronises the chroma, builds an affinity self-similarity matrix,
+    applies a Foote (2000) checkerboard kernel to extract a novelty curve,
+    and peak-picks to locate structural boundaries.  Agglomerative clustering
+    is not used; the peaks themselves are the boundaries.
 
     Returns:
         List of (start_sec, end_sec) tuples.
     """
     try:
         duration = librosa.get_duration(y=y, sr=sr)
-        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-        k = min(8, len(chroma[0]) // 10)
-        boundaries = librosa.segment.agglomerative(chroma, k)
-        boundary_times = librosa.frames_to_time(boundaries, sr=sr)
+        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+        boundary_times = _novelty_boundaries(chroma, y, sr, float(duration))
 
         raw = []
         for i in range(len(boundary_times) - 1):
@@ -270,13 +412,174 @@ def post_process_sections(
         labeled[0] = _retype_section(labeled[0], "verse")
 
     # Break up any run of 3+ same type by flipping the middle one
+    # (treat pre_chorus as distinct — never flip it into a run-breaker)
     for i in range(1, len(labeled) - 1):
-        if (labeled[i - 1].section_type == labeled[i].section_type ==
-                labeled[i + 1].section_type):
-            flip = "verse" if labeled[i].section_type == "chorus" else "chorus"
+        prev_t = labeled[i - 1].section_type
+        curr_t = labeled[i].section_type
+        next_t = labeled[i + 1].section_type
+        if prev_t == curr_t == next_t and curr_t != "pre_chorus":
+            flip = "verse" if curr_t == "chorus" else "chorus"
             labeled[i] = _retype_section(labeled[i], flip)
 
+    # ── Step 4: Identify pre_chorus ───────────────────────────────────────────
+    # A verse or chorus immediately preceding a higher-energy chorus, with
+    # energy ≥ 60% of the following chorus, is likely a pre_chorus.
+    for i in range(len(labeled) - 1):
+        curr = labeled[i]
+        nxt = labeled[i + 1]
+        if (curr.section_type in ("verse", "chorus")
+                and nxt.section_type == "chorus"
+                and curr.energy_level >= 0.60 * nxt.energy_level
+                and curr.energy_level < nxt.energy_level):
+            labeled[i] = _retype_section(curr, "pre_chorus")
+
     return [sections[0]] + labeled + [sections[-1]]
+
+
+def relabel_by_lyrical_repetition(
+    sections: List,
+    similarity_threshold: float = 0.5,
+) -> List:
+    """Override section labels for repeated lyric blocks (likely choruses).
+
+    Computes pairwise Jaccard similarity between inner section word sets.
+    Any inner section that shares >= similarity_threshold overlap with at
+    least one other inner section is relabeled 'chorus'. Intro and outro
+    are never changed. Skips silently if no section has lyrical_content
+    (e.g. standard depth where Whisper has not run).
+    """
+    if len(sections) <= 2:
+        return sections
+
+    inner = sections[1:-1]
+    if not any(s.lyrical_content for s in inner):
+        return sections
+
+    def _word_set(text: str) -> set:
+        return set(text.lower().split()) if text else set()
+
+    def _jaccard(a: set, b: set) -> float:
+        if not a or not b:
+            return 0.0
+        return len(a & b) / len(a | b)
+
+    word_sets = [_word_set(s.lyrical_content) for s in inner]
+    n = len(inner)
+
+    relabeled = list(inner)
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            if _jaccard(word_sets[i], word_sets[j]) >= similarity_threshold:
+                relabeled[i] = _retype_section(inner[i], "chorus")
+                break  # already promoted
+
+    return [sections[0]] + relabeled + [sections[-1]]
+
+
+def relabel_by_hook_phrase(sections: List, min_sections: int = 2) -> List:
+    """Re-label sections using the most repeated all-content-word hook phrase.
+
+    Algorithm:
+      1. Extract 2–4 word n-grams from inner section lyrics where ALL words
+         are content words (not stop words).
+      2. The hook is the phrase appearing in the most distinct inner sections;
+         ties broken by phrase length (longer wins), then lexicographic.
+      3. Inner sections containing the hook → 'chorus' (intro/outro protected).
+      4. Inner sections immediately preceding a hook-chorus that aren't already
+         'verse' → 'pre_chorus'.
+      5. Inner sections between two choruses with no hook and energy below the
+         median chorus energy → 'bridge'.
+    """
+    if len(sections) <= 2:
+        return sections
+
+    inner = sections[1:-1]
+    if not any(s.lyrical_content for s in inner):
+        return sections
+
+    _STOP = {
+        "i", "im", "ill", "ive", "id", "me", "my", "myself", "we", "our",
+        "you", "your", "he", "she", "it", "its", "they", "them", "their",
+        "what", "which", "who", "whom", "this", "that", "these", "those",
+        "am", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "shall", "can", "need", "dare",
+        "a", "an", "the",
+        "and", "but", "or", "nor", "for", "yet", "so",
+        "in", "on", "at", "to", "of", "by", "up", "as", "if",
+        "not", "no", "nor",
+        "oh", "ah", "yeah", "hey", "ooh", "uh",
+        "with", "from", "into", "about", "than", "then", "when",
+        "just", "now", "got", "get", "let", "like",
+    }
+
+    import re
+
+    def _tokens(text: str) -> List[str]:
+        return [re.sub(r"[^a-z]", "", w.lower()) for w in re.split(r"\s+", text) if w]
+
+    def _is_content(w: str) -> bool:
+        return bool(w) and w not in _STOP and w.isalpha()
+
+    # Collect content-word n-grams per inner section
+    phrase_section_sets: dict = {}
+    for idx, sec in enumerate(inner):
+        if not sec.lyrical_content:
+            continue
+        words = _tokens(sec.lyrical_content)
+        for n in range(2, 5):
+            for i in range(len(words) - n + 1):
+                gram = words[i : i + n]
+                if all(_is_content(w) for w in gram):
+                    phrase = " ".join(gram)
+                    if phrase not in phrase_section_sets:
+                        phrase_section_sets[phrase] = set()
+                    phrase_section_sets[phrase].add(idx)
+
+    candidates = [
+        (phrase, secs)
+        for phrase, secs in phrase_section_sets.items()
+        if len(secs) >= min_sections
+    ]
+
+    if not candidates:
+        return sections
+
+    hook, hook_section_idxs = max(
+        candidates, key=lambda x: (len(x[1]), len(x[0].split()), x[0])
+    )
+
+    result = list(inner)
+
+    # Sections containing the hook → chorus
+    for i in range(len(result)):
+        if i in hook_section_idxs:
+            result[i] = _retype_section(result[i], "chorus")
+
+    # Section immediately before a hook-chorus that isn't verse/chorus → pre_chorus
+    for i in range(1, len(result)):
+        if result[i].section_type == "chorus" and i in hook_section_idxs:
+            prev = result[i - 1]
+            if prev.section_type not in ("verse", "chorus", "pre_chorus"):
+                result[i - 1] = _retype_section(prev, "pre_chorus")
+
+    # Between two choruses with no hook and energy < median chorus → bridge
+    chorus_energies = [s.energy_level for s in result if s.section_type == "chorus"]
+    if len(chorus_energies) >= 2:
+        median_chorus_e = sorted(chorus_energies)[len(chorus_energies) // 2]
+        for i in range(1, len(result) - 1):
+            if (
+                result[i - 1].section_type == "chorus"
+                and result[i + 1].section_type == "chorus"
+                and result[i].section_type not in ("chorus", "pre_chorus")
+                and i not in hook_section_idxs
+                and result[i].energy_level < median_chorus_e
+            ):
+                result[i] = _retype_section(result[i], "bridge")
+
+    return [sections[0]] + result + [sections[-1]]
 
 
 def estimate_key(chroma: np.ndarray) -> str:

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 @dataclass
 class SectionInfo:
     """Per-section audio metadata."""
-    section_type: str          # "intro" | "verse" | "chorus" | "bridge" | "outro"
+    section_type: str          # "intro" | "verse" | "pre_chorus" | "chorus" | "bridge" | "outro"
     start_sec: float
     end_sec: float
     duration_sec: float
@@ -38,7 +38,7 @@ class SceneTiming:
     duration_sec: float
     is_hero: bool              # Top 25% energy — gets more VRAM / better model
     energy_level: float        # 0.0-1.0
-    section_type: str          # "intro" | "verse" | "chorus" | "bridge" | "outro"
+    section_type: str          # "intro" | "verse" | "pre_chorus" | "chorus" | "bridge" | "outro"
     beat_aligned: bool         # True if start_sec snapped to a beat boundary
 
 

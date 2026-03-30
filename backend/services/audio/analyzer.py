@@ -35,6 +35,8 @@ from backend.services.audio.analysis import (
     classify_section_type,
     detect_sections,
     post_process_sections,
+    relabel_by_lyrical_repetition,
+    relabel_by_hook_phrase,
     estimate_key,
     key_to_camelot,
 )
@@ -147,6 +149,46 @@ def _build_sections(
     return sections
 
 
+def _align_lyrics_to_sections(
+    sections: List[SectionInfo],
+    word_timings: List[Dict[str, Any]],
+) -> List[SectionInfo]:
+    """Populate SectionInfo.lyrical_content from Whisper segments.
+
+    Each Whisper segment (dict with 'start', 'end', 'text') is assigned to the
+    section whose time range contains the segment midpoint. Segments that fall
+    past the last section boundary are appended to the last section.
+    """
+    if not sections or not word_timings:
+        return sections
+
+    buffers: List[List[str]] = [[] for _ in sections]
+
+    for seg in word_timings:
+        try:
+            seg_start = float(seg.get("start", 0))
+            seg_end = float(seg.get("end", seg_start))
+            text = seg.get("text", "").strip()
+        except (TypeError, ValueError):
+            continue
+        if not text:
+            continue
+        mid = (seg_start + seg_end) / 2.0
+        placed = False
+        for i, sec in enumerate(sections):
+            if sec.start_sec <= mid < sec.end_sec:
+                buffers[i].append(text)
+                placed = True
+                break
+        if not placed:
+            buffers[-1].append(text)
+
+    for sec, buf in zip(sections, buffers):
+        sec.lyrical_content = " ".join(buf)
+
+    return sections
+
+
 # ── main class ────────────────────────────────────────────────────────────────
 
 class AudioAnalyzer:
@@ -226,6 +268,7 @@ class AudioAnalyzer:
         # ── 4. Section detection ───────────────────────────────────────────────
         boundaries = detect_sections(y, sr)
         sections = _build_sections(y, sr, boundaries)
+        sections = post_process_sections(sections, basic["duration_sec"])
 
         if depth == "standard":
             return SongAnalysis(
@@ -245,6 +288,15 @@ class AudioAnalyzer:
 
         # ── 5. Whisper transcription (full only) ───────────────────────────────
         transcript_data = self._transcribe(audio_path)
+
+        # ── 5b. Align Whisper segments to sections ─────────────────────────────
+        sections = _align_lyrics_to_sections(sections, transcript_data.get("word_timings", []))
+
+        # ── 5c. Re-label by lyrical repetition ────────────────────────────────
+        sections = relabel_by_lyrical_repetition(sections)
+
+        # ── 5d. Re-label by hook phrase ────────────────────────────────────────
+        sections = relabel_by_hook_phrase(sections)
 
         # ── 6. Song-level LLM semantics ────────────────────────────────────────
         semantic = analyze_song_semantics(
