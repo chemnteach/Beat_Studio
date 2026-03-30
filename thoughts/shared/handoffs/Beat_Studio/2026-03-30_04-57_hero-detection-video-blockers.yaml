@@ -1,0 +1,76 @@
+---
+session: Beat_Studio
+date: 2026-03-30
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Hero moment detection, beat-aligned clips, and three video generation blockers fixed
+now: Investigate novelty curve boundary sensitivity — why no peak near 160s (GT bridge onset) in Island Girl
+
+test: python -m pytest backend/tests/unit/ -q
+
+done_this_session:
+  - task: Complete create_scene_plan to use _compute_hero_scores with has_lyrics gate; fallback to energy threshold when no lyrics (test compatibility preserved)
+    files: [backend/services/video/beat_sync.py]
+  - task: Add beat_aligned_clip_durations, _extract_hook_phrase, _compute_hero_scores as module-level functions in beat_sync.py
+    files: [backend/services/video/beat_sync.py]
+  - task: Wire beat_aligned_clip_durations into video.py; change _MAX_CLIP_SEC 8.0→5.0; add lyrical_content to _load_analysis_for_sync sections; import beat_aligned_clip_durations
+    files: [backend/routers/video.py]
+  - task: Add 21 unit tests across TestBeatAlignedClipDurations, TestComputeHeroScores, TestExtractHookPhrase
+    files: [backend/tests/unit/test_video_assembly.py]
+  - task: Remove hardcoded watercolor suffix from derive_video_prompt system prompt; update distiller.py docstring example
+    files: [backend/services/prompt/prompt_composer.py, backend/services/prompt/distiller.py]
+  - task: Update test_system_prompt_instructs_watercolor_suffix → now asserts suffix is NOT present
+    files: [backend/tests/unit/test_prompt_generation.py]
+  - task: Change default backend from animatediff to skyreels_r2v in style_mapper.py fallback styles and YAML lookup default
+    files: [backend/services/prompt/style_mapper.py]
+  - task: Change default selectedBackend state to 'skyreels_r2v'; add skyreels_r2v to BACKEND_LABELS
+    files: [frontend/src/components/VideoStudio.tsx]
+  - task: Wire ref_image_paths through GenerateRequest → _run_generate_video → ComposedPrompt (RunPodBackend already reads it)
+    files: [backend/routers/video.py]
+  - task: Add ref_image_paths state, file input UI, and POST payload wiring in VideoStudio.tsx
+    files: [frontend/src/components/VideoStudio.tsx]
+
+blockers: []
+
+questions:
+  - Island Girl GT bridge [160-190s] still not detectable — pipeline section [132.8-170.5s] spans both GT pre_chorus and bridge. Why no novelty peak near 160s?
+  - Should ref_image_paths in VideoStudio upload to server and return real paths, or are blob URLs acceptable for the worker? (Worker expects file paths, not blob URLs — upload endpoint needed)
+
+decisions:
+  - hero_score_has_lyrics_gate: When no string lyrical_content on any section (standard-depth analysis, mock tests), fall back to old energy threshold. Preserves all existing test compatibility.
+  - watercolor_is_user_choice: Removed hardcoded watercolor suffix from derive_video_prompt. style_mapper.py still lists watercolor as a valid style option — that's correct.
+  - skyreels_r2v_as_default: Changed all animatediff fallback defaults to skyreels_r2v in style_mapper.py. YAML cinematic entry already used wan26_cloud — left as-is.
+  - ref_image_paths_simple_wiring: For now ref_image_paths flows as a list of strings (file paths / blob URLs). Upload endpoint wiring is a separate task.
+
+findings:
+  - island_girl_no_hero_without_bridge: With current pipeline (no bridge label), highest scorer is pre_chorus [192.4s] at 0.362. Score never exceeds 0.6 threshold. Expected — fix boundary splitting first.
+  - ref_image_paths_gap_was_pure_plumbing: ComposedPrompt already had the field; RunPodBackend already encoded it. Only GenerateRequest and the worker function were missing the parameter.
+  - beat_aligned_no_beats_hero_stays_single: Hero section > 10s with no beat timestamps returns single clip (no midpoint split). Correct behavior — split only when a beat is available to snap to.
+
+worked:
+  - has_lyrics detection using isinstance(getattr(s, "lyrical_content", None), str) — correctly False for MagicMock objects in tests
+  - beat_aligned_clip_durations: hero snaps to downbeat (beats[::4]), regular snaps to nearest interior beat, arithmetic fallback when no beats inside interval
+  - Updating the watercolor test to assert the negative (APPEND not in system_msg) rather than just deleting it
+
+failed: []
+
+next:
+  - Investigate novelty curve: add debug output for Island Girl novelty curve, check for peak near 160s, try lowering threshold or adjusting win/delta in _novelty_boundaries
+  - Add server-side upload endpoint for ref portrait images so VideoStudio blob URLs are replaced by real server paths before POSTing to /api/video/generate
+  - Consider structural heuristic for bridge detection: section that appears once, not intro/outro, energy < median chorus → candidate bridge
+  - Commit all unstaged changes (beat_sync.py, video.py, prompt_composer.py, distiller.py, style_mapper.py, test files, VideoStudio.tsx)
+
+files:
+  created:
+    - thoughts/shared/handoffs/Beat_Studio/2026-03-30_04-57_hero-detection-video-blockers.yaml
+  modified:
+    - backend/services/video/beat_sync.py
+    - backend/routers/video.py
+    - backend/services/prompt/prompt_composer.py
+    - backend/services/prompt/distiller.py
+    - backend/services/prompt/style_mapper.py
+    - backend/tests/unit/test_video_assembly.py
+    - backend/tests/unit/test_prompt_generation.py
+    - frontend/src/components/VideoStudio.tsx

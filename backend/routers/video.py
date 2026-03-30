@@ -15,7 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from backend.services.video.beat_sync import BeatSynchronizer
+from backend.services.video.beat_sync import BeatSynchronizer, beat_aligned_clip_durations
 from backend.services.video.cost_estimator import CostEstimator
 from backend.services.video.model_router import ModelRouter, NoBackendAvailableError
 from backend.services.shared.task_manager import TaskManager
@@ -103,6 +103,7 @@ def _load_analysis_for_sync(audio_id: str) -> SimpleNamespace:
             end=s.get("end_sec", 0.0),
             section_type=s.get("section_type", "verse"),
             energy_level=s.get("energy_level", 0.5),
+            lyrical_content=s.get("lyrical_content", ""),
         ))
 
     return SimpleNamespace(
@@ -192,6 +193,7 @@ def _run_generate_video(
     backend: str = "local",
     runpod_model: Optional[str] = None,
     approved_image_paths: Optional[List[str]] = None,
+    ref_image_paths: Optional[List[str]] = None,
 ) -> None:
     """Background worker: full video generation pipeline."""
     tm = _get_task_manager()
@@ -311,6 +313,7 @@ def _run_generate_video(
 
         # 9. Wrap as ComposedPrompts for the backend API — carry LoRA configs per scene
         lora_by_name: Dict[str, LoRAConfig] = {la.name: la for la in active_loras}
+        _ref_imgs = ref_image_paths or []
         composed = [
             ComposedPrompt(
                 positive=sp.positive,
@@ -321,26 +324,35 @@ def _run_generate_video(
                 nsfw=False,
                 base_checkpoint=animation_style.base_checkpoint,
                 lora_configs=[lora_by_name[n] for n in sp.lora_names if n in lora_by_name],
+                ref_image_paths=_ref_imgs,
             )
             for sp in scene_prompts
         ]
 
-        # 9. Generate video clips — split each scene into ≤8s sub-clips
-        _MAX_CLIP_SEC = 8.0
+        # 9. Generate video clips — split each scene into beat-aligned sub-clips
+        _MAX_CLIP_SEC = 5.0
+        _beat_times = sync_ns.beat_times or None
+        _downbeat_times = _beat_times[::4] if _beat_times else None
         image_paths = approved_image_paths or []
         clips: List[VideoClip] = []
         clips_per_scene: List[int] = []
         clip_durations: List[float] = []
         total_clips = sum(
-            math.ceil(s.duration_sec / _MAX_CLIP_SEC) for s in synced_scenes
+            len(beat_aligned_clip_durations(
+                s.start_sec, s.end_sec, s.is_hero, _beat_times, _downbeat_times, _MAX_CLIP_SEC,
+            ))
+            for s in synced_scenes
         )
         clip_idx = 0
         for i, (cp, scene) in enumerate(zip(composed, synced_scenes)):
             if i < len(image_paths):
                 cp.init_image_path = image_paths[i]
-            num_clips = math.ceil(scene.duration_sec / _MAX_CLIP_SEC)
-            clip_dur = scene.duration_sec / num_clips
-            for j in range(num_clips):
+            scene_clip_durs = beat_aligned_clip_durations(
+                scene.start_sec, scene.end_sec, scene.is_hero,
+                _beat_times, _downbeat_times, _MAX_CLIP_SEC,
+            )
+            num_clips = len(scene_clip_durs)
+            for j, clip_dur in enumerate(scene_clip_durs):
                 pct = 25.0 + (clip_idx / max(total_clips, 1)) * 50.0
                 tm.update_progress(
                     task_id, "generating_clips", pct,
@@ -429,6 +441,7 @@ class GenerateRequest(BaseModel):
     backend: str = "local"               # "local" | "runpod"
     runpod_model: Optional[str] = None   # model name when backend="runpod"
     approved_image_paths: List[str] = [] # ordered storyboard keyframe paths (index 0 = scene 0)
+    ref_image_paths: List[str] = []      # artist portrait reference photos for R2V backends (max 3)
 
 
 class SceneEditRequest(BaseModel):
@@ -665,6 +678,7 @@ async def generate_video(
         request.backend,
         request.runpod_model,
         request.approved_image_paths or [],
+        request.ref_image_paths or [],
     )
     return {"task_id": task_id, "status": "queued", "plan_id": request.plan_id}
 

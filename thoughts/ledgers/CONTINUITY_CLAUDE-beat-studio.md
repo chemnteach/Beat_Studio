@@ -1,8 +1,8 @@
 # Continuity Ledger - Beat_Studio
 
-**Last Updated:** 2026-03-19
+**Last Updated:** 2026-03-30
 **Project:** Beat_Studio - Unified AI music video production platform
-**Current Phase:** SkyReels V3 Selected — R2 Upload Strategy for Long Clips
+**Current Phase:** Hero Detection + Video Blockers Fixed — Improve Boundary Detection
 
 ---
 
@@ -75,8 +75,25 @@ Production-ready music video generation platform combining:
   - [x] Discovered RunPod payload size limit (~10MB): 7s V3 clips (~24MB base64) exceed it
   - [x] RunPod endpoint timeout raised to 2400s
   - [x] 617/619 unit tests passing (2 pre-existing failures from real creds in backend/.env)
-- Now: [→] Implement R2 upload strategy in RunPod worker (worker uploads MP4 to Cloudflare R2, returns URL; backend downloads)
-- Next: Wire SkyReels V3 as default backend in video router
+  - [x] R2 upload in worker: MP4 → Cloudflare R2, handler returns video_url (SigV4 fix included)
+  - [x] Fixed RunPod handler: generator→regular return (serverless standard doesn't capture yields)
+  - [x] Fixed SkyReels-V3 HF repo ID: Skywork/SkyReels-V3-Reference2Video (not SkyReels-V3-R2V-14B)
+  - [x] Added --low_vram to V3 subprocess: FP8 quant + block offload, fits 14B on 24GB GPU
+  - [x] Fixed HF_HOME=/runpod-volume/hf_cache (was /workspace/hf_cache — container disk too small)
+  - [x] Validated full end-to-end pipeline (v33): 7s watercolor scene, 168 frames, 1570s, R2 upload OK
+  - [x] Validated ref_images pipeline (v33): 3 CC0 images → 5s clip, 120 frames, 1138s
+  - [x] TF32 measured: no speedup on FP8-quantized workload (kept in code, harmless)
+  - [x] Cleaned up Kijai FP8 files (~41GB freed); added delete_dirs maintenance op (v35)
+  - [x] derive_video_prompt() watercolor suffix: REMOVED — style is user choice, not a hardcoded default
+  - [x] Docker v35 deployed to endpoint 2zo31rfwfbzsz8; volume has warm 28GB model cache
+  - [x] Audio segmentation overhaul: novelty boundaries, lyrics alignment, relabel_by_hook_phrase (2-4 gram n-gram extraction, promotes chorus/pre_chorus/bridge)
+  - [x] Hero moment detection: 4-signal scoring (bridge type, temporal 50-75%, energy inflection, first hook phrase); has_lyrics gate; fallback to energy threshold for standard-depth
+  - [x] Beat-aligned clip splitting: beat_aligned_clip_durations; hero snaps to downbeats; regular snaps to beats; _MAX_CLIP_SEC 8→5; lyrical_content wired through _load_analysis_for_sync
+  - [x] ref_image_paths wiring: GenerateRequest field → _run_generate_video → ComposedPrompt.ref_image_paths (RunPodBackend already encoded it — gap closed)
+  - [x] Default backend: animatediff → skyreels_r2v in style_mapper.py fallback styles and VideoStudio.tsx initial state
+  - [x] VideoStudio.tsx: ref portrait photo file input (max 3), thumbnail previews, ref_image_paths in POST body
+- Now: [→] Improve boundary detection — investigate novelty curve near 160s for Island Girl GT bridge onset
+- Next: Upload endpoint for ref portrait images (currently blob URLs won't reach RunPod worker as valid paths)
 
 ## Key Decisions
 
@@ -97,12 +114,21 @@ Production-ready music video generation platform combining:
 - `scene_durations_now_wired`: VideoAssembler.assemble() now receives scene_durations from synced_scenes so clips loop/trim to exact beat-aligned durations.
 - `skyreels_v3_winner`: SkyReels V3 selected as production video backend after 3-model comparison. FramePack ok but smaller file, WAN 2.2 never ran (missing model files).
 - `multi_clip_per_scene`: Scenes split into ceil(duration/8) clips of equal duration. No looping. clips_per_scene tracks grouping for assembler. Transitions only at scene boundaries.
-- `runpod_payload_limit`: RunPod serverless output payload ~10MB max. 3s V3 clip (7.6MB raw / ~10MB b64) barely fits. 7s clip (~18MB raw / ~24MB b64) silently dropped — COMPLETED with no output key. Solution: R2 upload from worker, return URL.
-- `v3_generation_time`: SkyReels V3 at 480P takes ~3 min/sec of video on A100. Cold start adds ~5 min. 3s = ~10 min total, 7s = ~25 min GPU-only. Use ≤5s clips until R2 is wired.
+- `runpod_payload_limit`: RunPod serverless output payload ~10MB max. 3s V3 clip (7.6MB raw / ~10MB b64) barely fits. 7s clip (~18MB raw / ~24MB b64) silently dropped — COMPLETED with no output key. Solution: R2 upload from worker, return URL. RESOLVED in v24.
+- `v3_generation_time`: SkyReels V3 at 480P takes ~3 min/sec of video on A100. Warm cache: 5s clip = 1138s, 7s clip = 1570s. Cold start (first 28GB download) adds ~26 min.
+- `r2_sigv4_required`: boto3 with Cloudflare R2 requires explicit `config=botocore.config.Config(signature_version="s3v4")`. Default SigV4 negotiation fails.
+- `generator_vs_return`: RunPod standard serverless does NOT capture generator yields in output[]. Handler must be a regular function returning a single dict.
+- `hf_cache_on_volume`: HF_HOME must point to /runpod-volume/hf_cache. Container disk is ~20GB; SkyReels-V3-Reference2Video is 28GB.
+- `kijai_fp8_unusable`: ComfyUI-format FP8 safetensors from Kijai/WanVideo_comfy_fp8_scaled are incompatible with SkyReels-V3 generate_video.py. Use --low_vram for equivalent VRAM savings.
+- `tf32_no_benefit`: TF32 provides no speedup when model runs with FP8 quantization (--low_vram).
+- `watercolor_suffix_removed`: derive_video_prompt() no longer appends any style suffix. Style is selected by the user via StyleSelector; the prompt derivation step only strips image-specific terms and adds motion language.
+- `hero_score_has_lyrics_gate`: Multi-signal hero scoring only activates when at least one section has string lyrical_content. Fallback to energy threshold preserves all existing unit test compatibility with MagicMock sections.
+- `skyreels_r2v_new_default`: animatediff replaced by skyreels_r2v as default recommended_model in style_mapper.py fallback styles and as initial selectedBackend in VideoStudio.tsx.
+- `ref_image_paths_wired`: ref_image_paths now flows from GenerateRequest → _run_generate_video → every ComposedPrompt. RunPodBackend already encoded it via getattr. Upload-to-server wiring is a separate task (blob URLs from file input won't survive to the worker).
 
 ## Blockers
 
-- RunPod payload size limit blocks V3 clips >~4s — need R2 upload in worker before longer clips work
+- None. R2 upload unblocked long clip delivery.
 
 ## Open Questions / Known Issues
 
@@ -113,6 +139,7 @@ Production-ready music video generation platform combining:
 - `skyreels_v2_i2v_pipeline_class`: models.py uses WanImageToVideoPipeline as placeholder — verify exact class from Skywork/SkyReels-V2-I2V-14B-720P model card before deploying.
 - `skyreels_v3_r2v_pipeline`: RESOLVED — uses subprocess via generate_video.py (clone SkyworkAI/SkyReels-V3, copy script to /workspace/models/SkyReels-V3-R2V-14B/).
 - `runpod_winner_selection`: RESOLVED — SkyReels V3 selected. WAN 2.2 never ran (missing model files). FramePack ok but V3 chosen for quality.
+- `r2_upload_wired`: RESOLVED — worker uploads MP4 to R2, returns video_url. Backend RunPodBackend downloads via URL.
 
 ## Working Set
 
@@ -135,9 +162,21 @@ Production-ready music video generation platform combining:
 
 ## Test Status
 
-- Backend: 598 tests (includes 41 FramePack + 6 new GenerateRequest tests)
-- Frontend: 55 tests (includes 3 new VideoStudio tests)
-- Total: 653 tests passing
+- Backend: ~620 tests (617/619 passing pre-R2; 2 pre-existing failures from real creds in backend/.env)
+- Frontend: 55 tests
+- Total: ~675 tests
+
+## Docker / RunPod State
+
+| Key | Value |
+|-----|-------|
+| Current image | `chemnteach/beat-studio-worker:v35` |
+| Endpoint ID | `2zo31rfwfbzsz8` |
+| Template ID | `bgr4o5wxbs` |
+| Timeout | 3600s |
+| HF cache | `/runpod-volume/hf_cache/models--Skywork--SkyReels-V3-Reference2Video` (~28GB, warm) |
+| models_dir | empty (Kijai FP8 deleted) |
+| R2 env vars | confirmed on endpoint |
 
 ## LoRAs Available
 
@@ -263,3 +302,54 @@ All trained on **SDXL Base 1.0**.
 4. Deploy serverless endpoint
 5. Run: python scripts/runpod_compare.py --storyboard-zip path/to/approved.zip
 6. Review 15 clips, pick winner
+
+## Sessions 2026-03-19 to 2026-03-20: R2 Upload + Full Pipeline Validation (v24–v35)
+
+**What was done:**
+- Implemented R2 upload in worker: MP4 bytes → Cloudflare R2 → presigned URL returned as `video_url`
+  - SigV4 fix: explicit `botocore.config.Config(signature_version="s3v4")` required for R2
+  - Explicit env var validation on startup (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME)
+- Fixed generator handler: RunPod standard serverless doesn't capture yield outputs → converted to regular return
+- Fixed SkyReels-V3 HF repo ID: `Skywork/SkyReels-V3-Reference2Video` (was `Skywork/SkyReels-V3-R2V-14B`)
+- Added `--low_vram` to V3 subprocess: FP8 weight-only quant + block offload, fits 14B on 24GB GPU
+- Fixed HF_HOME=/runpod-volume/hf_cache (was /workspace/hf_cache — only 21GB free, model is 28GB)
+- Added watercolor suffix to derive_video_prompt() system prompt — appended to every video prompt
+- Added `list_models_dir` and `delete_dirs` maintenance ops to handler
+- Validated end-to-end pipeline:
+  - v33 scene11: 7s, 480x720, 168 frames, 1570s, R2 upload confirmed
+  - v33 ref_images: 3 CC0 images, 5s, 120 frames, 1138s
+- TF32 test (v34): no speedup on FP8-quantized workload (1679s vs 1570s baseline)
+- Cleaned up ~41GB Kijai FP8 files from network volume (v35)
+- GraphQL saveTemplate mutation used to update endpoint image without dashboard access
+
+**Next:**
+1. Wire `skyreels_v3_r2v` as default model in backend video router (runpod_client.py or video.py)
+2. Evaluate output/v33_test_scene11.mp4 and output/v33_ref_images_test.mp4
+3. Character consistency test with real same-person portraits (2–3 angles)
+
+## Session 2026-03-29: Audio Segmentation + Hook Phrase Detection
+
+**What was done:**
+- Audio segmentation overhaul (committed as a09efdb): novelty-based boundary detection, Whisper lyrics alignment, 5-stage relabeling pipeline
+- Added `relabel_by_hook_phrase()`: extracts most-repeated all-content-word 2-4 gram across inner sections; promotes to chorus/pre_chorus/bridge; 7 unit tests
+- Wired `relabel_by_hook_phrase` as step 5d in analyzer.py after `relabel_by_lyrical_repetition`
+- Validated with Island Girl Whisper transcription: "island girl" correctly wins as hook (5 inner sections) over "old man" (4)
+- Found boundary is the bottleneck: GT bridge [160-190s] falls inside single pipeline section [132.8-170.5s]
+
+## Session 2026-03-30: Hero Detection + Video Pipeline Blockers
+
+**What was done:**
+- Multi-signal hero scoring in beat_sync.py: 4 signals (bridge type, temporal 50-75%, energy inflection, first hook phrase), threshold 0.6, has_lyrics gate
+- beat_aligned_clip_durations: hero→downbeat split, regular→beat snap, _MAX_CLIP_SEC 8→5
+- Wired lyrical_content through _load_analysis_for_sync; beat_aligned_clip_durations into video.py clip loop
+- Removed hardcoded watercolor suffix from derive_video_prompt() system prompt
+- Changed default backend animatediff → skyreels_r2v (style_mapper.py + VideoStudio.tsx)
+- Wired ref_image_paths: GenerateRequest field → _run_generate_video → ComposedPrompt (was already encoded by RunPodBackend)
+- Added portrait reference photo file input in VideoStudio.tsx
+- 21 new unit tests (TestBeatAlignedClipDurations, TestComputeHeroScores, TestExtractHookPhrase)
+- 666/668 tests passing (2 pre-existing failures)
+
+**Next:**
+1. Investigate novelty curve boundary sensitivity near 160s (GT bridge onset for Island Girl)
+2. Add server-side upload endpoint for portrait ref images (blob URLs don't survive to RunPod worker)
+3. Character consistency test with real same-person portrait photos

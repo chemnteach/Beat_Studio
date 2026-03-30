@@ -44,7 +44,7 @@ class PromptDistiller:
     Usage::
 
         distiller = PromptDistiller()
-        scene_prompts = distiller.distill(scene_prompts, style_prefix="watercolor painting, ")
+        scene_prompts = distiller.distill(scene_prompts, style_prefix="cinematic film still, ")
     """
 
     def __init__(self, llm_provider: str = "anthropic"):

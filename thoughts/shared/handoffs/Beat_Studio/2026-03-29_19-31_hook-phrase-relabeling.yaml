@@ -1,0 +1,60 @@
+---
+session: Beat_Studio
+date: 2026-03-29
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Add hook-phrase relabeling pass — find repeated n-gram, label containing sections chorus/bridge/pre_chorus
+now: Investigate why boundary detection places one section across GT pre_chorus+bridge (132.8-170.5s); split or adjust novelty peak sensitivity
+
+test: python -m pytest backend/tests/unit/test_audio_analyzer.py -q
+
+done_this_session:
+  - task: Implement relabel_by_hook_phrase in analysis.py — 2-4 word content-word n-gram extraction, hook=phrase in most distinct sections, promotes to chorus/pre_chorus/bridge
+    files: [backend/services/audio/analysis.py]
+  - task: Import and wire relabel_by_hook_phrase in analyzer.py as step 5d after relabel_by_lyrical_repetition
+    files: [backend/services/audio/analyzer.py]
+  - task: Add 7 unit tests in TestRelabelByHookPhrase covering all branches
+    files: [backend/tests/unit/test_audio_analyzer.py]
+  - task: Commit segmentation overhaul (a09efdb) — all audio segmentation work from both sessions
+    files: [backend/services/audio/analysis.py, backend/services/audio/analyzer.py, backend/services/audio/types.py, backend/tests/unit/test_audio_analyzer.py]
+
+blockers: []
+
+questions:
+  - Bridge at GT 160-190s is inside pipeline section [132.8-170.5s] which spans both GT pre_chorus and bridge. The novelty curve isn't placing a boundary at 160s. Need to understand why.
+  - "old man" wins over "island girl" as hook (3 vs 2 sections). Both are valid repeated phrases in the song. Is this the right signal or should title-word phrases get priority?
+
+decisions:
+  - hook_selection_max_sections: Hook = phrase in most distinct inner sections, tie-break by phrase length then lexicographic. No special handling for song title words.
+  - stop_word_list_inline: Used a hardcoded minimal stop word list (no NLTK dependency) — ~50 common function words + interjections.
+  - bridge_condition: bridge fires when section is between two choruses AND has no hook AND energy < median chorus energy.
+
+findings:
+  - hook_phrase_works_mechanically: relabel_by_hook_phrase correctly identifies the repeated phrase and promotes sections. For Island Girl, "old man" (3 sections) beats "island girl" (2 sections).
+  - boundary_is_the_bottleneck: All type-label mismatches in Island Girl are caused by boundary placement, not label logic. The 6/7 GT inner boundaries within 10s score is unchanged by hook phrase pass.
+  - pre_chorus_140_160_regressed: That GT pre_chorus section (140-160s) mapped to pipeline pre_chorus [132.8-170.5s] before hook pass; after hook pass, [132.8-170.5s] became chorus (contains "old man"). Net: one correct-type match lost.
+  - bridge_not_detectable_from_current_boundaries: The GT bridge [160-190s] falls inside a single pipeline section [132.8-170.5s] that also spans GT pre_chorus. Can't relabel half a section. Need tighter boundaries.
+
+worked:
+  - n-gram content-word filtering correctly excludes stop words ("I'm", "an", "the") so "old man" and "island girl" rank above stop-word-containing phrases
+  - intro/outro protection: inner = sections[1:-1], changes only applied to inner
+  - 7 unit tests all pass including bridge detection and pre_chorus assignment tests
+
+failed:
+  - hook phrase pass for Island Girl: bridge not detectable because the boundary at 160s is missing. Hook pass made pre_chorus→chorus which was a small regression.
+
+next:
+  - Investigate novelty curve boundary sensitivity: why no peak near 160s (GT bridge onset). Try lowering the novelty threshold or adjusting the win/delta parameters in _novelty_boundaries.
+  - Consider a structural heuristic: sections that appear exactly once and are not intro/outro, with energy similar to chorus, are bridge candidates.
+  - Commit remaining unstaged changes (prompt_composer.py, runpod_worker/) when ready.
+  - Consider using LLM lyrical_function field (when semantic.py is implemented) as a higher-signal chorus/bridge discriminator.
+
+files:
+  created:
+    - thoughts/shared/handoffs/Beat_Studio/2026-03-29_19-31_hook-phrase-relabeling.yaml
+  modified:
+    - backend/services/audio/analysis.py
+    - backend/services/audio/analyzer.py
+    - backend/tests/unit/test_audio_analyzer.py

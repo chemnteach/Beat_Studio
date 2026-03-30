@@ -48,6 +48,7 @@ const BACKEND_LABELS: Record<string, { label: string; note: string }> = {
   wan26_local:     { label: 'WAN 2.6 Local',       note: '16 GB VRAM — highest local quality' },
   wan26_cloud:     { label: 'WAN 2.6 Cloud',       note: 'RunPod — best quality, ~$0.05/scene' },
   skyreels:        { label: 'SkyReels V2',         note: 'RunPod — seamless stitching (DF)' },
+  skyreels_r2v:    { label: 'SkyReels V3 R2V',     note: 'RunPod — reference-to-video (default)' },
   cogvideox:       { label: 'CogVideoX',           note: 'Cloud — stub' },
   mochi:           { label: 'Mochi',               note: 'Cloud — stub' },
   ltx_video:       { label: 'LTX Video',           note: 'Cloud — stub' },
@@ -69,7 +70,7 @@ function toMMSS(sec: number): string {
 export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
   const [stage, setStage] = useState<Stage>('style');
   const [selectedStyle, setSelectedStyle] = useState('cinematic');
-  const [selectedBackend, setSelectedBackend] = useState('animatediff');
+  const [selectedBackend, setSelectedBackend] = useState('skyreels_r2v');
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [showBackends, setShowBackends] = useState(false);
   const [creativeDirection, setCreativeDirection] = useState('');
@@ -87,6 +88,7 @@ export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
   const [selectedLoraNames, setSelectedLoraNames] = useState<string[]>([]);
   const [storyboardId, setStoryboardId] = useState<string | null>(null);
   const [approvedImagePaths, setApprovedImagePaths] = useState<Record<string, string>>({});
+  const [refImagePaths, setRefImagePaths] = useState<string[]>([]);
 
   const songTitle = analysis?.title;
 
@@ -177,6 +179,7 @@ export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
         lora_names: selectedLoraNames,
         backend: 'local',
         approved_image_paths,
+        ref_image_paths: refImagePaths,
       };
       if (indices && indices.length > 0) body.scene_indices = indices;
       const { data } = await axios.post<{ task_id: string }>('/api/video/generate', body);
@@ -284,6 +287,38 @@ export function VideoStudio({ audioId, analysis, sections, onBack }: Props) {
               ✓ {sections.length} sections with lyrical content will be used for prompt generation
             </div>
           )}
+
+          {/* Artist portrait reference photos for R2V backends */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', marginBottom: '6px', color: '#aaa', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              Artist Portrait References <span style={{ color: '#555', fontWeight: 'normal', textTransform: 'none' }}>(optional, for R2V — max 3)</span>
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              data-testid="ref-image-input"
+              onChange={e => {
+                const files = Array.from(e.target.files ?? []);
+                const paths = files.slice(0, 3).map(f => URL.createObjectURL(f));
+                setRefImagePaths(paths);
+              }}
+              style={{ fontSize: '0.82rem', color: '#aaa' }}
+            />
+            {refImagePaths.length > 0 && (
+              <div style={{ marginTop: '6px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {refImagePaths.map((p, i) => (
+                  <img key={i} src={p} alt={`ref ${i + 1}`} style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #0f3460' }} />
+                ))}
+                <button
+                  onClick={() => setRefImagePaths([])}
+                  style={{ alignSelf: 'center', fontSize: '0.75rem', padding: '2px 8px', background: '#1a0a0a', border: '1px solid #555' }}
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
 
           <StyleSelector selected={selectedStyle} onSelect={handleStyleSelect} />
 

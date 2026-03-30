@@ -12,7 +12,7 @@ Model IDs (HuggingFace):
   skyreels_v2_i2v: Skywork/SkyReels-V2-I2V-14B-720P
   skyreels_v2_df:  Skywork/SkyReels-V2-DF-14B-720P-Diffusers
   wan22_i2v:       Wan-AI/Wan2.2-I2V-14B-720P
-  skyreels_v3_r2v: Skywork/SkyReels-V3-R2V-14B
+  skyreels_v3_r2v: Skywork/SkyReels-V3-Reference2Video (via generate_video.py --low_vram)
 """
 from __future__ import annotations
 
@@ -203,7 +203,7 @@ def _load_wan22_i2v():
     return pipe
 
 
-_SKYREELS_V3_R2V_HF_REPO = "Skywork/SkyReels-V3-R2V-14B"
+_SKYREELS_V3_R2V_HF_REPO = "Skywork/SkyReels-V3-Reference2Video"
 
 
 def _load_skyreels_v3_r2v() -> dict:
@@ -397,6 +397,7 @@ def _gen_skyreels_v3_r2v(
             "--duration", str(int(duration_sec)),
             "--resolution", res_str,
             "--offload",
+            "--low_vram",  # FP8 weight-only quantization — fits 14B on 24GB GPU
         ]
         if seed and seed != -1:
             cmd += ["--seed", str(seed)]

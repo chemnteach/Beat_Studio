@@ -611,3 +611,18 @@ class TestDeriveVideoPrompt:
         mock_openai_cls.return_value = self._make_mock_openai("  a clean result  \n")
         result = derive_video_prompt("any prompt")
         assert result == "a clean result"
+
+    @patch("openai.OpenAI")
+    def test_system_prompt_does_not_append_watercolor_suffix(self, mock_openai_cls):
+        """System prompt must NOT instruct GPT-4 to append a watercolor suffix.
+        Style is a user choice, not a hardcoded default."""
+        from backend.services.prompt.prompt_composer import derive_video_prompt
+
+        mock_openai_cls.return_value = self._make_mock_openai("some video prompt")
+        derive_video_prompt("any prompt")
+
+        call_args = mock_openai_cls.return_value.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
+        system_msg = next(m["content"] for m in messages if m["role"] == "system")
+        assert "APPEND" not in system_msg
+        assert "watercolor painting style, soft painted edges" not in system_msg

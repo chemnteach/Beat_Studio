@@ -445,3 +445,174 @@ class TestVideoEncoderEncode:
                 quality="standard",
                 platform="laserdisc",
             )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# beat_aligned_clip_durations
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from backend.services.video.beat_sync import beat_aligned_clip_durations, _compute_hero_scores, _extract_hook_phrase  # noqa: E402
+
+
+class TestBeatAlignedClipDurations:
+    def test_zero_duration_returns_stub(self):
+        result = beat_aligned_clip_durations(5.0, 5.0, False, None, None)
+        assert len(result) == 1
+        assert result[0] > 0
+
+    def test_hero_short_section_is_single_clip(self):
+        result = beat_aligned_clip_durations(0.0, 8.0, True, None, None)
+        assert result == [8.0]
+
+    def test_hero_long_section_no_beats_returns_single_clip(self):
+        # No beat timestamps → no interior beat to split at; returns single clip
+        result = beat_aligned_clip_durations(0.0, 20.0, True, None, None)
+        assert result == [20.0]
+
+    def test_hero_long_section_snaps_to_downbeat(self):
+        downbeats = [4.0, 8.0, 12.0, 16.0]
+        result = beat_aligned_clip_durations(0.0, 20.0, True, downbeats, downbeats)
+        assert len(result) == 2
+        assert sum(result) == pytest.approx(20.0)
+        # Split should be at the downbeat nearest to midpoint (10.0) → 8.0 or 12.0
+        assert result[0] in (8.0, 12.0)
+
+    def test_regular_section_splits_to_max_clip_sec(self):
+        result = beat_aligned_clip_durations(0.0, 15.0, False, None, None, max_clip_sec=5.0)
+        assert len(result) == 3
+        assert sum(result) == pytest.approx(15.0)
+
+    def test_regular_section_snaps_to_beat(self):
+        beats = [2.0, 4.0, 6.0, 8.0, 10.0, 12.0]
+        result = beat_aligned_clip_durations(0.0, 12.0, False, beats, None, max_clip_sec=5.0)
+        assert len(result) >= 2
+        assert sum(result) == pytest.approx(12.0)
+        assert all(d > 0 for d in result)
+
+    def test_result_sums_to_section_duration(self):
+        beats = [i * 0.5 for i in range(1, 30)]
+        result = beat_aligned_clip_durations(0.0, 14.3, False, beats, None, max_clip_sec=5.0)
+        assert sum(result) == pytest.approx(14.3, abs=0.001)
+
+    def test_single_clip_when_duration_under_max(self):
+        result = beat_aligned_clip_durations(10.0, 14.0, False, None, None, max_clip_sec=5.0)
+        assert result == [4.0]
+
+
+class TestComputeHeroScores:
+    def _make_section(self, start, end, stype="verse", energy=0.5, lyrical=""):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            start_sec=start, start=start,
+            end_sec=end, end=end,
+            section_type=stype,
+            energy_level=energy,
+            lyrical_content=lyrical,
+        )
+
+    def test_intro_and_outro_always_zero(self):
+        secs = [
+            self._make_section(0, 30, "intro"),
+            self._make_section(30, 60, "verse"),
+            self._make_section(60, 90, "outro"),
+        ]
+        scores = _compute_hero_scores(secs, 90.0)
+        assert scores[0] == 0.0
+        assert scores[2] == 0.0
+
+    def test_bridge_signal_fires(self):
+        secs = [
+            self._make_section(0, 30, "verse"),
+            self._make_section(30, 60, "bridge"),
+            self._make_section(60, 90, "verse"),
+        ]
+        scores = _compute_hero_scores(secs, 90.0)
+        # bridge at position 1 → s1=1.0; midpoint=45/90=0.5 → s2=1.0 (boundary included)
+        # score = (1+1+0+0)/4 = 0.5
+        assert scores[1] >= 0.5
+
+    def test_temporal_signal_fires_in_window(self):
+        # Section midpoint at 60% of 100s → s2=1.0
+        secs = [
+            self._make_section(0, 40, "verse"),
+            self._make_section(40, 80, "chorus"),
+            self._make_section(80, 100, "outro"),
+        ]
+        scores = _compute_hero_scores(secs, 100.0)
+        # midpoint of section[1] = 60.0 / 100.0 = 0.6 → in [0.5, 0.75]
+        assert scores[1] > 0.0
+
+    def test_hook_signal_fires_for_first_occurrence(self):
+        repeated = "hello world"
+        # 200s total. section[1] midpoint=50, ratio=0.25 (outside 50-75% → s2=0).
+        # section[2] midpoint=125, ratio=0.625 (inside 50-75% → s2=1.0).
+        # section[1] gets s4=1.0 (first hook); section[2] gets s4=0.0.
+        # scores[1] = (0+0+0+1)/4 = 0.25; scores[2] = (0+1+0+0)/4 = 0.25.
+        # Both equal — verify s4 is what differs, by using very long song so section[1] is early.
+        # Instead test that s4 is present: section before hook in temporal window beats non-hook.
+        secs = [
+            self._make_section(0, 10, "verse", lyrical="some intro text"),
+            self._make_section(10, 20, "chorus", lyrical=repeated),       # first hook
+            self._make_section(80, 90, "chorus", lyrical=repeated),       # second hook, in window
+            self._make_section(90, 100, "outro", lyrical="outro"),
+        ]
+        scores = _compute_hero_scores(secs, 100.0)
+        # section[1]: midpoint=15/100=0.15 → s2=0; s4=1.0 → score=0.25
+        # section[2]: midpoint=85/100=0.85 → s2=0; s4=0.0 → score=0.0
+        # Hook fires only for first occurrence
+        assert scores[1] > scores[2]
+
+    def test_empty_sections_returns_empty(self):
+        assert _compute_hero_scores([], 100.0) == []
+
+    def test_scores_bounded_0_1(self):
+        secs = [
+            self._make_section(0, 20, "verse"),
+            self._make_section(20, 70, "bridge", energy=0.9, lyrical="go go go go go"),
+            self._make_section(70, 100, "outro"),
+        ]
+        scores = _compute_hero_scores(secs, 100.0)
+        assert all(0.0 <= s <= 1.0 for s in scores)
+
+
+class TestExtractHookPhrase:
+    def _make_section(self, lyrical):
+        from types import SimpleNamespace
+        return SimpleNamespace(lyrical_content=lyrical)
+
+    def test_returns_most_repeated_phrase(self):
+        secs = [
+            self._make_section("baby love baby love"),
+            self._make_section("baby love you know"),
+            self._make_section("baby love again"),
+        ]
+        result = _extract_hook_phrase(secs)
+        assert result == "baby love"
+
+    def test_returns_none_when_no_repeated_phrase(self):
+        secs = [
+            self._make_section("totally different words"),
+            self._make_section("nothing in common here"),
+        ]
+        result = _extract_hook_phrase(secs)
+        assert result is None
+
+    def test_skips_stop_words(self):
+        secs = [
+            self._make_section("i am here now"),
+            self._make_section("i am going home"),
+        ]
+        # All 2-4 grams from "i am here now" that are all content words:
+        # "here now" would be the only candidate; "i am" are stop words
+        result = _extract_hook_phrase(secs)
+        # "here now" doesn't appear in both sections, so None
+        assert result is None
+
+    def test_empty_sections_returns_none(self):
+        assert _extract_hook_phrase([]) is None
+
+    def test_no_lyrical_content_returns_none(self):
+        from types import SimpleNamespace
+        secs = [SimpleNamespace(), SimpleNamespace()]
+        result = _extract_hook_phrase(secs)
+        assert result is None

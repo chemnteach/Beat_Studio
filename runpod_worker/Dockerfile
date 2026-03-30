@@ -2,10 +2,14 @@ FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 WORKDIR /app
 
-# All HuggingFace model cache goes to the network volume
-ENV HF_HOME=/workspace/hf_cache
-ENV HF_HUB_CACHE=/workspace/hf_cache
+# All HuggingFace model cache goes to the network volume (mounted at /runpod-volume)
+ENV HF_HOME=/runpod-volume/hf_cache
+ENV HF_HUB_CACHE=/runpod-volume/hf_cache
 ENV HF_HUB_ENABLE_HF_TRANSFER=0
+
+# Execution timeout hint — ALSO set "Max Execution Time" to 3600 in the
+# RunPod endpoint dashboard (Serverless → your endpoint → Edit → Advanced)
+ENV RUNPOD_MAX_JOB_TIMEOUT=3600
 
 COPY requirements.txt .
 RUN apt-get update && apt-get install -y ffmpeg
