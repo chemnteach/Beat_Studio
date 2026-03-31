@@ -1,0 +1,61 @@
+---
+session: Beat_Studio
+date: 2026-03-30
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Three structural prompt pipeline fixes — silent swap, default depth, character consistency
+now: Commit all unstaged changes; then investigate Island Girl novelty boundary (no peak near 160s)
+
+test: python -m pytest backend/tests/unit/ -q
+
+done_this_session:
+  - task: Fix silent swap — _run_generate_video now runs PromptDistiller after ScenePromptGenerator, then applies user_overrides post-distillation (verbatim, not re-generated)
+    files: [backend/routers/video.py]
+  - task: Change default analysis depth from standard to full so Whisper runs for every upload
+    files: [backend/routers/audio.py]
+  - task: Add ref_image_paths param to NarrativeAnalyzer.analyze/_build_prompt; inject CHARACTER CONSISTENCY block when refs present, using first token of creative_direction as descriptor
+    files: [backend/services/prompt/narrative_analyzer.py]
+  - task: Wire ref_image_paths into NarrativeAnalyzer call in _run_generate_video
+    files: [backend/routers/video.py]
+  - task: Add 2 unit tests — character consistency instruction present/absent based on ref_image_paths
+    files: [backend/tests/unit/test_prompt_generation.py]
+
+blockers: []
+
+questions:
+  - Island Girl GT bridge [160-190s] still not detectable — pipeline section [132.8-170.5s] spans both GT pre_chorus and bridge. Why no novelty peak near 160s? Investigate _novelty_boundaries win/delta.
+  - ref_image_paths in VideoStudio are blob URLs — upload endpoint needed before worker can use them as file paths.
+
+decisions:
+  - silent_swap_fix_approach: Generate without overrides → distill → apply overrides post-distillation. This ensures generation matches exactly what artist reviewed in /api/video/prompts.
+  - char_descriptor_from_creative_direction: First comma-split token of creative_direction used as character label. If no creative_direction, falls back to "the main subject".
+  - depth_full_default: Every upload now runs Whisper. Integration tests that pass depth explicitly are unaffected.
+
+findings:
+  - distiller_already_in_review_stage: PromptDistiller was already called correctly in /api/video/prompts (lines 539-541). Only _run_generate_video was missing it — pure omission, not a design conflict.
+  - ref_image_paths_already_wired_to_runpod: ComposedPrompt.ref_image_paths existed, RunPodBackend read it via getattr. Only NarrativeAnalyzer and the generate call site were missing the parameter.
+  - test_count_grew_to_668: Two new NarrativeAnalyzer tests push passing count from 666 to 668. Same 2 pre-existing env-dependent failures (test_config, test_runpod_backend).
+
+worked:
+  - Inline PromptDistiller import inside _run_generate_video (matches review stage pattern)
+  - char_label = user_concept.split(",")[0].strip() gives clean first-token descriptor
+  - patch.object(az, "_call_llm") pattern for capturing prompt content in tests
+
+failed: []
+
+next:
+  - Commit all unstaged changes (video.py, audio.py, narrative_analyzer.py, test_prompt_generation.py + prior session files)
+  - Investigate novelty curve: debug Island Girl novelty near 160s, try lowering threshold or adjusting win/delta in _novelty_boundaries
+  - Add server-side upload endpoint for ref portrait images so VideoStudio blob URLs become real file paths
+  - Consider structural heuristic for bridge detection: section appearing once, not intro/outro, energy < median chorus
+
+files:
+  created:
+    - thoughts/shared/handoffs/Beat_Studio/2026-03-30_06-05_prompt-pipeline-structural-fixes.yaml
+  modified:
+    - backend/routers/video.py
+    - backend/routers/audio.py
+    - backend/services/prompt/narrative_analyzer.py
+    - backend/tests/unit/test_prompt_generation.py

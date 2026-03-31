@@ -57,7 +57,7 @@ def _get_analyzer() -> AudioAnalyzer:
 
 class AnalyzeRequest(BaseModel):
     audio_id: str
-    depth: Literal["basic", "standard", "full"] = "standard"
+    depth: Literal["basic", "standard", "full"] = "full"
     artist: str = ""          # Optional; falls back to filename stem
     title: str = ""           # Optional; falls back to filename stem
 

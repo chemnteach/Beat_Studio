@@ -174,6 +174,51 @@ class TestNarrativeAnalyzerAnalyze:
         assert isinstance(result, NarrativeArc)
         assert len(result.sections) > 0
 
+    def test_ref_image_paths_injects_character_consistency_instruction(self):
+        from backend.services.prompt.narrative_analyzer import NarrativeAnalyzer
+        analysis = _make_analysis()
+        az = NarrativeAnalyzer()
+        captured_prompt = []
+
+        def fake_call_llm(prompt):
+            captured_prompt.append(prompt)
+            return {
+                "overall_concept": "X", "color_palette": ["blue"],
+                "mood_progression": "hopeful", "visual_style_hint": "cinematic",
+                "sections": [{"section_index": i, "visual_description": "s",
+                              "key_lyric": "l", "themes": []}
+                             for i in range(len(analysis.sections))],
+            }
+
+        with patch.object(az, "_call_llm", side_effect=fake_call_llm):
+            az.analyze(analysis, user_concept="a young woman in a red dress",
+                       ref_image_paths=["/tmp/portrait.jpg"])
+
+        prompt = captured_prompt[0]
+        assert "CHARACTER CONSISTENCY" in prompt
+        assert "a young woman in a red dress" in prompt
+
+    def test_no_ref_image_paths_omits_character_consistency_instruction(self):
+        from backend.services.prompt.narrative_analyzer import NarrativeAnalyzer
+        analysis = _make_analysis()
+        az = NarrativeAnalyzer()
+        captured_prompt = []
+
+        def fake_call_llm(prompt):
+            captured_prompt.append(prompt)
+            return {
+                "overall_concept": "X", "color_palette": ["blue"],
+                "mood_progression": "hopeful", "visual_style_hint": "cinematic",
+                "sections": [{"section_index": i, "visual_description": "s",
+                              "key_lyric": "l", "themes": []}
+                             for i in range(len(analysis.sections))],
+            }
+
+        with patch.object(az, "_call_llm", side_effect=fake_call_llm):
+            az.analyze(analysis)
+
+        assert "CHARACTER CONSISTENCY" not in captured_prompt[0]
+
 
 # ── ScenePromptGenerator ──────────────────────────────────────────────────────
 

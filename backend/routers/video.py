@@ -239,7 +239,9 @@ def _run_generate_video(
         # 4. Narrative analysis (LLM or heuristic fallback)
         tm.update_progress(task_id, "analyzing_narrative", 15.0, "Analyzing narrative arc…")
         narrative = NarrativeAnalyzer().analyze(
-            analysis, user_concept=creative_direction or None,
+            analysis,
+            user_concept=creative_direction or None,
+            ref_image_paths=ref_image_paths or None,
         )
 
         # 5. Animation style
@@ -297,19 +299,27 @@ def _run_generate_video(
                     len(active_loras), [la.name for la in active_loras])
 
         # 8. Generate per-scene prompts.
-        # user_overrides keys arrive as strings from the frontend; ScenePromptGenerator
-        # needs int keys so user text is used as base_desc (style prefix is still prepended).
+        # Generate without overrides first, then distill (matching what artist reviewed),
+        # then apply user_overrides post-distillation so reviewed text is used verbatim.
         tm.update_progress(task_id, "generating_prompts", 20.0, "Building scene prompts…")
+        scene_prompts = ScenePromptGenerator().generate_prompts(
+            narrative, scene_timings, animation_style, loras=active_loras,
+        )
+
+        # Distill to short (<60 word) generation prompts — matches what artist reviewed
+        from backend.services.prompt.distiller import PromptDistiller
+        scene_prompts = PromptDistiller().distill(scene_prompts, animation_style.prefix)
+
+        # Apply user-reviewed overrides post-distillation (verbatim, not re-generated)
         int_overrides: Dict[int, str] = {
             int(k): v for k, v in (user_overrides or {}).items()
             if k.isdigit() and v.strip()
         }
         if int_overrides:
-            logger.info("Applying %d user-reviewed prompt(s) via ScenePromptGenerator", len(int_overrides))
-        scene_prompts = ScenePromptGenerator().generate_prompts(
-            narrative, scene_timings, animation_style,
-            loras=active_loras, user_overrides=int_overrides,
-        )
+            logger.info("Applying %d user-reviewed override(s) post-distillation", len(int_overrides))
+            for sp in scene_prompts:
+                if sp.scene_index in int_overrides:
+                    sp.positive = int_overrides[sp.scene_index]
 
         # 9. Wrap as ComposedPrompts for the backend API — carry LoRA configs per scene
         lora_by_name: Dict[str, LoRAConfig] = {la.name: la for la in active_loras}

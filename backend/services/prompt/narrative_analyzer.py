@@ -46,17 +46,21 @@ class NarrativeAnalyzer:
         self,
         analysis: SongAnalysis,
         user_concept: Optional[str] = None,
+        ref_image_paths: Optional[List[str]] = None,
     ) -> NarrativeArc:
         """Generate a NarrativeArc from a SongAnalysis.
 
         Args:
             analysis: Completed SongAnalysis (depth="standard" or "full").
             user_concept: Optional creative direction from the user.
+            ref_image_paths: Optional list of reference portrait image paths.
+                When provided, the LLM is instructed to maintain character
+                consistency across all scene descriptions.
 
         Returns:
             NarrativeArc with per-section visual descriptions.
         """
-        prompt = self._build_prompt(analysis, user_concept)
+        prompt = self._build_prompt(analysis, user_concept, ref_image_paths)
         try:
             raw = self._call_llm(prompt)
             arc = self._parse_response(raw, analysis)
@@ -75,7 +79,12 @@ class NarrativeAnalyzer:
 
     # ── internal: LLM call ────────────────────────────────────────────────────
 
-    def _build_prompt(self, analysis: SongAnalysis, user_concept: Optional[str]) -> str:
+    def _build_prompt(
+        self,
+        analysis: SongAnalysis,
+        user_concept: Optional[str],
+        ref_image_paths: Optional[List[str]] = None,
+    ) -> str:
         sections_summary = "\n".join(
             f"  Section {i} ({s.section_type}, {s.start_sec:.0f}s-{s.end_sec:.0f}s, "
             f"energy={s.energy_level:.2f}, tone={s.emotional_tone}): '{s.lyrical_content[:120]}'"
@@ -85,6 +94,21 @@ class NarrativeAnalyzer:
             f"\n\nCREATIVE DIRECTION (prioritise this above all else):\n{user_concept}"
             if user_concept else ""
         )
+        # Derive a stable character descriptor from creative_direction (user_concept) or a generic label.
+        # When ref images are present the LLM must reference this descriptor in every scene.
+        char_label = None
+        if ref_image_paths:
+            if user_concept:
+                # Use the first noun phrase-ish token from creative_direction as the label
+                char_label = user_concept.split(",")[0].strip()
+            else:
+                char_label = "the main subject"
+        char_instruction = (
+            f'\n\nCHARACTER CONSISTENCY (required — portrait reference images provided):\n'
+            f'Every visual_description MUST include the descriptor "{char_label}" so the AI '
+            f'generator maintains character identity across all clips. Reference the same person '
+            f'throughout — vary the scene and emotion, not the character.'
+        ) if char_label else ""
 
         return f"""You are a music video creative director writing shot-by-shot visual descriptions for an AI video generation pipeline.
 
@@ -93,7 +117,7 @@ BPM: {analysis.bpm:.0f}, Key: {analysis.key}, Genre: {analysis.primary_genre}
 Overall mood: {analysis.mood_summary}
 Emotional arc: {analysis.emotional_arc}
 Lyric excerpt (context only): {analysis.transcript[:400]}
-{user_dir}
+{user_dir}{char_instruction}
 
 Sections and their lyrics (use lyrics to understand meaning and emotion — do NOT copy them into output):
 {sections_summary}

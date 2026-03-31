@@ -1,0 +1,130 @@
+---
+session: Beat_Studio
+date: 2026-03-20
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Fix generator handler, correct HF repo ID, fix HF cache path, verify full pipeline end-to-end
+
+now: Evaluate output videos (v33_test_scene11.mp4, v33_ref_images_test.mp4) for quality; wire skyreels_v3_r2v as default model in backend video router
+
+test: conda run -n beatcanvas python -m pytest backend/tests/unit/ -q
+
+done_this_session:
+  - task: Fixed generator handler — converted from yield to regular return (v31)
+    files: [runpod_worker/src/handler.py]
+    notes: |
+      RunPod standard serverless does NOT capture generator yields in output[].
+      All maintenance ops and video generation now use return dict, not yield.
+      Added list_models_dir maintenance op.
+
+  - task: Fixed SkyReels-V3 HF repo ID and added --low_vram flag (v32)
+    files: [runpod_worker/src/models.py]
+    notes: |
+      _SKYREELS_V3_R2V_HF_REPO was "Skywork/SkyReels-V3-R2V-14B" (doesn't exist).
+      Correct ID: "Skywork/SkyReels-V3-Reference2Video" (from generate_video.py MODEL_ID_CONFIG).
+      Added --low_vram to subprocess cmd: FP8 weight-only quant + block offload, fits 14B on 24GB GPU.
+      The Kijai FP8 safetensors files are ComfyUI format — incompatible with generate_video.py.
+
+  - task: Fixed HF cache path — was /workspace/hf_cache (container disk, 20GB), now /runpod-volume/hf_cache (v33)
+    files: [runpod_worker/Dockerfile]
+    notes: |
+      Container disk only had ~21GB free; Skywork/SkyReels-V3-Reference2Video is 28GB.
+      HF_HOME and HF_HUB_CACHE now point to /runpod-volume/hf_cache (network volume).
+      First run (v33 test) downloaded 28GB model in ~26 min. Now cached; subsequent runs ~19 min.
+
+  - task: Validated full end-to-end pipeline (v33)
+    files: [output/v33_test_scene11.mp4]
+    notes: |
+      scene_11 storyboard, 7s, 480x720, seed 42, watercolor prompt.
+      COMPLETED: 168 frames, 1570s, 17MB, R2 upload successful.
+
+  - task: Validated ref_images pipeline (v33)
+    files: [output/v33_ref_images_test.mp4]
+    notes: |
+      3x CC0 picsum images, 5s, 480x720. COMPLETED: 120 frames, 1138s, 11MB.
+      ref_images pathway confirmed working (encode → transmit → decode → --ref_imgs arg).
+      Placeholder images were random CC0 photos, not same-person portraits.
+      For real character consistency test, need 2-3 photos of same person from different angles.
+
+  - task: Added TF32 enablement, measured no speedup (v34)
+    files: [runpod_worker/src/handler.py]
+    notes: |
+      torch.backends.cuda.matmul.allow_tf32 = True + torch.backends.cudnn.allow_tf32 = True
+      Added at module level in handler.py after logger init.
+      Baseline (v33): 1570s. With TF32 (v34): 1679s. No improvement.
+      Expected: --low_vram FP8 quantization already handles precision; TF32 only benefits FP32 matmuls.
+
+  - task: Cleaned up Kijai FP8 files (~41GB recovered), added delete_dirs maintenance op (v35)
+    files: [runpod_worker/src/handler.py]
+    notes: |
+      Deleted SkyReelsV3-R2V-FP8 (13.5GB) and SkyReelsV3-V2V-FP8 (27.1GB) from /runpod-volume/models/.
+      Added delete_dirs maintenance op — takes {"dirs": ["name1", "name2"]} list.
+      Safety: only deletes names (no slashes), only under /runpod-volume/models/.
+      models_dir is now empty; active model lives in /runpod-volume/hf_cache/.
+
+decisions:
+  - generator_vs_return: RunPod serverless standard endpoints do NOT capture generator yields.
+      Handler must be a regular function returning a single dict. Use print() for progress logging.
+  - hf_cache_on_volume: HF_HOME must point to /runpod-volume/hf_cache, not /workspace/hf_cache.
+      Container disk is 20GB; SkyReels-V3-Reference2Video is 28GB — must go to network volume.
+  - kijai_fp8_unusable: ComfyUI-format FP8 safetensors from Kijai/WanVideo_comfy_fp8_scaled are
+      incompatible with SkyReels-V3 generate_video.py. Use --low_vram for equivalent VRAM savings.
+  - tf32_no_benefit: TF32 provides no speedup when model runs with FP8 quantization (--low_vram).
+      Kept in code (harmless) but not a viable optimization lever for this workload.
+
+findings:
+  - generate_video_py_args: Script accepts --low_vram (FP8 quant + block offload), --offload
+      (CPU offload), --use_usp (multi-GPU). MODEL_ID_CONFIG maps task_type to correct HF repo IDs.
+  - model_warm_cache: After first 28GB download, subsequent jobs run ~19 min (1138s for 5s clip,
+      1570s for 7s clip). Cold start (first run ever) was 1570s including download.
+  - ref_images_arg_format: generate_video.py receives --ref_imgs as comma-separated paths.
+      models.py passes [primary_path] + ref_paths, joined with commas, max 4 total.
+
+worked:
+  - Regular return dict handler (not generator) captures correctly in RunPod output
+  - HF_HOME=/runpod-volume/hf_cache routes 28GB model to network volume successfully
+  - delete_dirs maintenance op with name-only safety check works cleanly
+  - GraphQL saveTemplate mutation to update endpoint image without dashboard access
+
+failed:
+  - Generator handler (yield/yield from): RunPod standard serverless returns output: [] — yields not captured
+  - HF_HOME=/workspace/hf_cache: Only 21GB free on container disk, 28GB model fails with "no space"
+  - Kijai FP8 safetensors as model_id: These are ComfyUI weight files, not HF model directories
+  - TF32 optimization: No speedup on FP8-quantized model workload
+
+next:
+  - Evaluate output videos: output/v33_test_scene11.mp4 (watercolor scene), output/v33_ref_images_test.mp4
+  - Wire skyreels_v3_r2v as default model in backend video router
+      (backend/services/video/backends/runpod_client.py or wherever model is selected)
+  - Run proper character consistency test with real same-person portrait photos (2-3 angles)
+  - Consider: run compare_models.py to do a proper multi-scene generation test against full storyboard
+
+files:
+  created:
+    - output/v33_test_scene11.mp4
+    - output/v33_ref_images_test.mp4
+    - output/v34_tf32_test.mp4
+  modified:
+    - runpod_worker/src/handler.py
+    - runpod_worker/src/models.py
+    - runpod_worker/Dockerfile
+
+docker:
+  current_version: v35
+  endpoint_id: 2zo31rfwfbzsz8
+  template_id: bgr4o5wxbs
+  image: chemnteach/beat-studio-worker:v35
+  r2_env_vars_confirmed: true
+
+volume_state:
+  hf_cache: /runpod-volume/hf_cache/models--Skywork--SkyReels-V3-Reference2Video (~28GB, warm)
+  models_dir: empty (Kijai FP8 files deleted, old models never existed on this volume)
+
+generation_benchmarks:
+  model: skyreels_v3_r2v
+  resolution: 480x720
+  7s_168frames_warm: 1570s (v33, no TF32)
+  7s_168frames_tf32: 1679s (v34, with TF32 — within noise, no improvement)
+  5s_120frames_warm: 1138s (v33, ref_images test)
