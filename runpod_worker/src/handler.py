@@ -28,8 +28,8 @@ Job output schema (maintenance):
   models_dir     dict  — {dirname: "X.X GB"} for all entries in /runpod-volume/models/
   error          str   — present only on failure
 
-NOTE: Execution timeout must be set to 3600s in the RunPod endpoint dashboard:
-  Serverless → your endpoint → Edit → Max Execution Time → 3600
+NOTE: Execution timeout must be set to 5400s in the RunPod endpoint dashboard:
+  Serverless → your endpoint → Edit → Max Execution Time → 5400
 """
 from __future__ import annotations
 
@@ -136,85 +136,57 @@ def _scan_models_dir() -> dict:
 # ── Maintenance handler ───────────────────────────────────────────────────────
 
 def _maintenance_download_models() -> dict:
-    """Download FP8 SkyReels V3 weights and clean up old models.
+    """Download Skywork/SkyReels-V3-Reference2Video into the HF cache.
+
+    Uses snapshot_download so the full diffusers-format repo lands under
+    HF_HOME (/runpod-volume/hf_cache). generate_video.py finds it there via
+    the standard HF cache lookup — no re-download needed at generation time.
+    The worker applies FP8 quantization natively via --low_vram --offload.
 
     Progress logged to stdout (visible in RunPod worker logs).
-    Returns a result dict — regular function, not a generator.
     """
     try:
-        from huggingface_hub import hf_hub_download
+        from huggingface_hub import snapshot_download
     except ImportError as exc:
         return {"status": "error", "error": f"huggingface_hub not available: {exc}"}
 
-    # Disable hf_transfer — known to cause issues with large files on some platforms
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
 
-    HF_REPO      = "Kijai/WanVideo_comfy_fp8_scaled"
-    HF_SUBFOLDER = "SkyReelsV3"
+    HF_REPO  = "Skywork/SkyReels-V3-Reference2Video"
+    hf_cache = Path(os.environ.get("HF_HOME", "/runpod-volume/hf_cache"))
 
-    # Note: first filename uses underscore (Wan21_SkyReelsV3); others use hyphen
-    downloads = [
-        {
-            "filename": "Wan21_SkyReelsV3-R2V_fp8_scaled_mixed.safetensors",
-            "local_dir": "/runpod-volume/models/SkyReelsV3-R2V-FP8",
-        },
-        {
-            "filename": "Wan21-SkyReelsV3-V2V_fp8_scaled_mixed.safetensors",
-            "local_dir": "/runpod-volume/models/SkyReelsV3-V2V-FP8",
-        },
-        {
-            "filename": "Wan21-SkyReelsV3-V2V_shot_fp8_scaled_mixed.safetensors",
-            "local_dir": "/runpod-volume/models/SkyReelsV3-V2V-FP8",
-        },
-    ]
+    print(f"[MAINT] snapshot_download {HF_REPO} → HF cache at {hf_cache} ...", flush=True)
+    logger.info("Starting snapshot_download: %s (HF_HOME=%s)", HF_REPO, hf_cache)
 
+    try:
+        local_path = snapshot_download(repo_id=HF_REPO)
+    except Exception as exc:
+        logger.error("snapshot_download failed: %s", traceback.format_exc())
+        return {"status": "error", "error": f"Download failed: {exc}"}
+
+    cached = Path(local_path)
+    if not cached.exists():
+        return {"status": "error", "error": f"Cache path missing after download: {cached}"}
+
+    size_bytes = sum(f.stat().st_size for f in cached.rglob("*") if f.is_file())
+    size_gb    = size_bytes / (1024 ** 3)
+    print(f"[MAINT] Verified: {HF_REPO} ({size_gb:.1f} GB at {cached})", flush=True)
+    logger.info("Verified: %s (%.1f GB at %s)", HF_REPO, size_gb, cached)
+
+    if size_bytes < _MIN_MODEL_SIZE:
+        return {
+            "status": "error",
+            "error":  f"Verification failed: {HF_REPO} is {size_gb:.1f} GB, expected >10 GB",
+        }
+
+    # Clean up old/incompatible model directories from the network volume
     to_delete = [
+        "/runpod-volume/models/SkyReelsV3-R2V-FP8",
+        "/runpod-volume/models/SkyReelsV3-V2V-FP8",
         "/runpod-volume/models/Wan2.2-I2V-A14B",
         "/runpod-volume/models/FramePackI2V_HY",
         "/runpod-volume/models/SkyReels-V3-R2V-14B",
     ]
-
-    downloaded = []
-
-    for spec in downloads:
-        filename  = spec["filename"]
-        local_dir = spec["local_dir"]
-
-        print(f"[MAINT] Downloading {filename} → {local_dir} ...", flush=True)
-        logger.info("Starting download: %s → %s", filename, local_dir)
-
-        try:
-            Path(local_dir).mkdir(parents=True, exist_ok=True)
-            actual_path = hf_hub_download(
-                repo_id=HF_REPO,
-                filename=filename,
-                subfolder=HF_SUBFOLDER,
-                local_dir=local_dir,
-            )
-            dest_path = Path(actual_path)
-            print(f"[MAINT] Downloaded to: {dest_path}", flush=True)
-            logger.info("Downloaded to: %s", dest_path)
-        except Exception as exc:
-            logger.error("Download failed for %s: %s", filename, traceback.format_exc())
-            return {"status": "error", "error": f"Download failed for {filename}: {exc}", "downloaded": downloaded}
-
-        if not dest_path.exists():
-            msg = f"Verification failed: {dest_path} does not exist after download"
-            logger.error(msg)
-            return {"status": "error", "error": msg, "downloaded": downloaded}
-
-        size_bytes = dest_path.stat().st_size
-        size_gb    = size_bytes / (1024 ** 3)
-        if size_bytes < _MIN_MODEL_SIZE:
-            msg = f"Verification failed: {filename} is {size_gb:.1f} GB, expected >10 GB"
-            logger.error(msg)
-            return {"status": "error", "error": msg, "downloaded": downloaded}
-
-        downloaded.append({"file": str(dest_path), "size_gb": round(size_gb, 1)})
-        print(f"[MAINT] Verified: {filename} ({size_gb:.1f} GB)", flush=True)
-        logger.info("Verified: %s (%.1f GB)", filename, size_gb)
-
-    # Delete old model directories
     deleted = []
     for path_str in to_delete:
         p = Path(path_str)
@@ -233,7 +205,7 @@ def _maintenance_download_models() -> dict:
     models_dir = _scan_models_dir()
     return {
         "status":     "ok",
-        "downloaded": downloaded,
+        "downloaded": [{"repo": HF_REPO, "path": str(cached), "size_gb": round(size_gb, 1)}],
         "deleted":    deleted,
         "models_dir": models_dir,
     }

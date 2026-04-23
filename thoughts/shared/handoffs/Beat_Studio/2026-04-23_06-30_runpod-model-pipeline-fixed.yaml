@@ -1,0 +1,63 @@
+---
+session: Beat_Studio
+date: 2026-04-23
+status: complete
+outcome: SUCCEEDED
+---
+
+goal: Fix RunPod video generation pipeline — model not found, SSL errors, stale worker image
+now: Try a real video generation job to confirm end-to-end pipeline works with Skywork/SkyReels-V3-Reference2Video
+
+done_this_session:
+  - task: Add retry logic (4x exponential backoff) to R2 video download for SSL/network errors
+    files: [backend/services/video/backends/runpod_client.py]
+  - task: Diagnose empty network volume — models_dir was empty, causing job timeouts
+    files: []
+  - task: Fix download_models maintenance op — was pulling Kijai FP8 ComfyUI safetensors (incompatible); rewrote to use snapshot_download for full diffusers repo Skywork/SkyReels-V3-Reference2Video into HF_HOME
+    files: [runpod_worker/src/handler.py]
+  - task: Fix stale handler.py comment — Max Execution Time is 5400s not 3600s
+    files: [runpod_worker/src/handler.py]
+  - task: Build and push chemnteach/beat-studio-worker:v38 (v37 was cache-poisoned, used --no-cache for v38)
+    files: [runpod_worker/Dockerfile, runpod_worker/src/handler.py]
+  - task: Force-retire stale warm worker (6l3746rb0pv48x on old image) by scaling endpoint to 0
+    files: []
+  - task: Successfully download Skywork/SkyReels-V3-Reference2Video (48.3 GB) into /runpod-volume/hf_cache
+    files: []
+
+blockers: []
+
+questions:
+  - Does generate_video.py find the model at /runpod-volume/hf_cache/models--Skywork--SkyReels-V3-Reference2Video/snapshots/... when passed the HF repo ID?
+  - Is skyreels_v3_r2v the correct model_name to send from the client, or should it stay as skyreels_v2_df?
+
+decisions:
+  - use_standard_diffusers_not_fp8: generate_video.py uses from_pretrained() on standard diffusers repos; worker applies FP8 via --low_vram --offload at inference time — pre-quantized ComfyUI weights are incompatible
+  - snapshot_download_to_hf_cache: Download full repo into HF_HOME so HF Hub cache lookup short-circuits re-download on every generation job
+  - rebuild_as_v38_not_v37: v37 Docker build cached COPY src/ layer with old handler.py; --no-cache required to pick up changes
+
+findings:
+  - docker_layer_cache_poisoned: COPY src/ was cached in v37 build despite handler.py having been modified; always use --no-cache when src/ files change
+  - runpod_warm_worker_stale: Updating endpoint image tag does not retire already-warm workers; must scale to 0 to force cold restart
+  - runpod_job_timeout_is_dashboard_setting: RUNPOD_MAX_JOB_TIMEOUT env var in Dockerfile is a hint only; actual limit is set in RunPod dashboard under endpoint Advanced settings (must be 5400)
+  - path_mismatch_was_root_cause: download_models wrote to /runpod-volume/models/SkyReelsV3-R2V-FP8/ but models.py looked for /runpod-volume/models/SkyReels-V3-R2V-14B/ — nothing would ever match
+
+worked:
+  - delete_dirs maintenance op cleanly removes volume directories
+  - Scaling endpoint max workers to 0 reliably retires warm workers
+  - snapshot_download with no local_dir correctly places repo in HF_HOME cache
+  - --no-cache docker build ensures src/ file changes are captured
+
+failed:
+  - v37 Docker build: COPY src/ layer was served from cache, old handler.py was bundled — fix with --no-cache
+  - Kijai FP8 safetensors: ComfyUI format incompatible with diffusers from_pretrained() pipeline loader
+
+next:
+  - Submit a real generation job (model=skyreels_v3_r2v) and verify it completes without timeout
+  - Confirm generate_video.py subprocess picks up cached HF model correctly
+  - If generation succeeds end-to-end, do a full UI smoke test with a real audio file
+
+files:
+  created: []
+  modified:
+    - backend/services/video/backends/runpod_client.py
+    - runpod_worker/src/handler.py

@@ -38,7 +38,7 @@ _SUPPORTED_STYLES = {
 }
 _COST_PER_SCENE_USD = 0.08   # ~$0.08 per 5s scene on A100 80GB
 _POLL_INTERVAL_SEC  = 5
-_DEFAULT_TIMEOUT    = 2700   # 45 min — covers cold model load (14B from network vol) + generation
+_DEFAULT_TIMEOUT    = 5400   # 90 min — covers cold start (~5m) + 14B model load (~15m) + generation (~30-60m)
 MAX_CLIP_SEC        = 8.0    # hard cap; router is responsible for splitting longer scenes
 
 
@@ -158,6 +158,16 @@ class RunPodBackend(VideoBackend):
             logger.warning("init_image_path missing or not found (%r) — sending blank", init_path)
             image_b64 = _blank_png_b64()
 
+        ref_images = _encode_ref_images(getattr(prompt, "ref_image_paths", []), max_refs=3)
+        logger.warning(
+            "RunPod payload: model=%s resolution=%s duration=%.1fs init_image=%s ref_images=%d prompt=%.60r",
+            self._model_name,
+            [resolution[1], resolution[0]],
+            duration_sec,
+            "ok" if (init_path and Path(init_path).exists()) else "BLANK_FALLBACK",
+            len(ref_images),
+            prompt.positive,
+        )
         return {
             "input": {
                 "model": self._model_name,
@@ -167,7 +177,7 @@ class RunPodBackend(VideoBackend):
                 "resolution": [resolution[1], resolution[0]],  # worker expects [height, width]; resolution is (width, height)
                 "seed": seed,
                 "negative_prompt": prompt.negative or "blurry, low quality, distorted, deformed",
-                "ref_images": _encode_ref_images(getattr(prompt, "ref_image_paths", []), max_refs=3),
+                "ref_images": ref_images,
             }
         }
 
@@ -197,10 +207,7 @@ class RunPodBackend(VideoBackend):
         if "video_url" in result:
             url = result["video_url"]
             logger.info("Downloading clip from R2: %s…", url[:80])
-            with httpx.Client(timeout=120) as dl_client:
-                dl_resp = dl_client.get(url)
-                dl_resp.raise_for_status()
-                video_bytes = dl_resp.content
+            video_bytes = self._download_with_retry(url)
         else:
             video_bytes = base64.b64decode(result["video_b64"])
 
@@ -209,6 +216,22 @@ class RunPodBackend(VideoBackend):
         tmp.close()
         logger.info("RunPod clip saved: %s (%d KB)", tmp.name, len(video_bytes) // 1024)
         return tmp.name
+
+    def _download_with_retry(self, url: str, retries: int = 4, backoff: float = 3.0) -> bytes:
+        """Download video bytes with retry on transient SSL/network errors."""
+        last_exc: Exception = RuntimeError("no attempts made")
+        for attempt in range(retries):
+            try:
+                with httpx.Client(timeout=120) as dl_client:
+                    resp = dl_client.get(url)
+                    resp.raise_for_status()
+                    return resp.content
+            except (httpx.ReadError, httpx.NetworkError, httpx.TimeoutException) as exc:
+                last_exc = exc
+                wait = backoff * (2 ** attempt)
+                logger.warning("R2 download attempt %d/%d failed (%s) — retrying in %.0fs", attempt + 1, retries, exc, wait)
+                time.sleep(wait)
+        raise RuntimeError(f"R2 download failed after {retries} attempts: {last_exc}") from last_exc
 
     def _poll(self, job_id: str) -> dict:
         """Poll RunPod status endpoint until COMPLETED or FAILED."""
@@ -258,9 +281,12 @@ def _encode_ref_images(paths: list, max_refs: int = 3) -> list:
             break
         path = Path(p)
         if path.exists():
+            size_kb = path.stat().st_size // 1024
             encoded.append(base64.b64encode(path.read_bytes()).decode())
+            logger.info("ref_image encoded: %s (%d KB)", path.name, size_kb)
         else:
             logger.warning("ref_image_path not found, skipping: %s", p)
+    logger.info("ref_images encoded: %d/%d paths resolved", len(encoded), len(paths))
     return encoded
 
 
